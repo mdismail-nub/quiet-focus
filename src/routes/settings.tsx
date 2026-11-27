@@ -1,11 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { ChevronRight } from "lucide-react";
+import { Bell, ChevronRight } from "lucide-react";
 import { useFocus, type Theme } from "@/lib/focus-store";
 import type { Ambient } from "@/lib/ambient";
 import { LANDSCAPE_THEMES } from "@/lib/landscape-themes";
 import { Card, Header, PillButton, Sheet, SyncStatusChip } from "@/components/ui-kit";
 import { PWAInstallSettingsControl } from "@/components/PWAControls";
+import { NotificationOnboarding } from "@/components/NotificationOnboarding";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/settings")({
@@ -125,7 +126,7 @@ function SettingsScreen() {
   const [ambientOpen, setAmbientOpen] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [custom, setCustom] = useState(s.customMinutes);
-  const [notifyNote, setNotifyNote] = useState<string | null>(null);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [wakeLockSupported, setWakeLockSupported] = useState(true);
 
   useEffect(() => {
@@ -137,31 +138,15 @@ function SettingsScreen() {
     if (f.timer.status === "idle") f.selectMinutes(m);
   };
 
-  const toggleNotify = async (v: boolean) => {
-    setNotifyNote(null);
-    if (!v) {
-      f.setSettings({ notify: false });
-      return;
-    }
-    if (typeof window === "undefined" || !("Notification" in window)) {
-      setNotifyNote("Browser notifications are not supported on this device.");
-      return;
-    }
-    if (Notification.permission === "granted") {
-      f.setSettings({ notify: true });
-      return;
-    }
-    try {
-      const p = await Notification.requestPermission();
-      if (p === "granted") {
-        f.setSettings({ notify: true });
-      } else {
-        setNotifyNote("Notifications are blocked in browser settings.");
-      }
-    } catch {
-      setNotifyNote("Unable to enable notifications in this browser.");
-    }
-  };
+  const np = f.notificationPrefs;
+  const notificationStatusText =
+    f.notificationPermission === "unsupported"
+      ? "Unsupported on this browser"
+      : f.notificationPermission === "denied"
+        ? "Blocked in browser settings"
+        : np.enabled && f.notificationPermission === "granted"
+          ? `Enabled · ${np.dailyMotivation ? `${np.dailyCount} daily` : "Sessions only"}`
+          : "Not requested · Set up";
 
   const ambientLabel = AMBIENT_OPTIONS.find((a) => a.id === s.ambient)?.label ?? "Off";
 
@@ -278,8 +263,26 @@ function SettingsScreen() {
             onChange={(v) => f.setSettings({ sound: v })}
           />
         </Row>
-        <Row label="Completion notification" hint={notifyNote ?? undefined}>
-          <Toggle label="Completion notification" on={s.notify} onChange={toggleNotify} />
+        <Row label="Focus Companion alerts" hint={notificationStatusText}>
+          <div className="flex items-center gap-1">
+            {!np.enabled && f.notificationPermission === "default" && (
+              <button
+                type="button"
+                onClick={() => setOnboardingOpen(true)}
+                className="press flex min-h-11 items-center gap-1 rounded-full px-2.5 text-xs font-semibold text-primary hover:bg-primary-soft"
+              >
+                <Bell className="size-3.5" />
+                Guided setup
+              </button>
+            )}
+            <Link
+              to="/notifications"
+              className="press flex min-h-11 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+            >
+              Manage
+              <ChevronRight className="size-4" />
+            </Link>
+          </div>
         </Row>
         <Row
           label="Keep screen awake"
@@ -435,6 +438,8 @@ function SettingsScreen() {
           </PillButton>
         </div>
       </Sheet>
+
+      <NotificationOnboarding open={onboardingOpen} onClose={() => setOnboardingOpen(false)} />
     </div>
   );
 }

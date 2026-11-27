@@ -8,6 +8,16 @@ import {
   isoWeekKey,
   validateSessionSubmission,
 } from "./lib/gamification";
+import {
+  cancelSessionCompletion,
+  getPublicVapidInfo,
+  removePushSubscription,
+  scheduleSessionCompletion,
+  sendTestPush,
+  startPushScheduler,
+  updateSubscriptionPreferences,
+  upsertPushSubscription,
+} from "./lib/push-server";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -23,6 +33,8 @@ async function getServerEntry(): Promise<ServerEntry> {
   }
   return serverEntryPromise;
 }
+
+startPushScheduler();
 
 // Simple sliding-window rate limiter for API routes (max 30 submissions per minute per client key)
 const rateBuckets = new Map<string, number[]>();
@@ -51,10 +63,127 @@ function jsonResponse(payload: unknown, status = 200): Response {
   });
 }
 
+function readInstallationAuth(request: Request, body: Record<string, unknown>) {
+  const headerId = request.headers.get("x-installation-id")?.trim() ?? "";
+  const bodyId = typeof body["installationId"] === "string" ? body["installationId"].trim() : "";
+  const installationId = headerId || bodyId;
+  const installSecret = request.headers.get("x-installation-secret")?.trim() ?? "";
+  return { installationId, installSecret };
+}
+
 async function handleApiRoute(request: Request): Promise<Response | null> {
   const url = new URL(request.url);
   if (url.pathname === "/api/health" && (request.method === "GET" || request.method === "HEAD")) {
     return jsonResponse({ ok: true, serverTime: Date.now() }, 200);
+  }
+
+  if (url.pathname === "/api/push/vapid-public-key" && request.method === "GET") {
+    return jsonResponse(getPublicVapidInfo(), 200);
+  }
+
+  if (url.pathname.startsWith("/api/push/") && request.method === "POST") {
+    const now = Date.now();
+    const clientKey =
+      request.headers.get("x-installation-id")?.slice(0, 64) ||
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      "local-push-client";
+
+    if (!checkRateLimit(`push:${clientKey}`, now)) {
+      return jsonResponse(
+        { ok: false, error: "Too many push requests. Please retry shortly." },
+        429,
+      );
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      const parsed = await request.json();
+      body = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+    } catch {
+      return jsonResponse({ ok: false, error: "Invalid JSON payload." }, 400);
+    }
+
+    const { installationId, installSecret } = readInstallationAuth(request, body);
+    if (!installationId || !installSecret) {
+      return jsonResponse({ ok: false, error: "Installation credentials required." }, 401);
+    }
+
+    if (url.pathname === "/api/push/subscribe") {
+      const result = upsertPushSubscription({
+        installationId,
+        installSecret,
+        subscription: body["subscription"] as Parameters<
+          typeof upsertPushSubscription
+        >[0]["subscription"],
+        preferences: (body["preferences"] ?? {}) as Parameters<
+          typeof upsertPushSubscription
+        >[0]["preferences"],
+        activeSessionStatus:
+          body["activeSessionStatus"] === "running" || body["activeSessionStatus"] === "paused"
+            ? body["activeSessionStatus"]
+            : "idle",
+      });
+      return jsonResponse(result, result.ok ? 200 : 400);
+    }
+
+    if (url.pathname === "/api/push/unsubscribe") {
+      const result = removePushSubscription(installationId, installSecret);
+      return jsonResponse(result, result.ok ? 200 : 401);
+    }
+
+    if (url.pathname === "/api/push/preferences") {
+      const prefsBody =
+        body["preferences"] && typeof body["preferences"] === "object"
+          ? {
+              preferences: body["preferences"] as NonNullable<
+                Parameters<typeof updateSubscriptionPreferences>[0]["preferences"]
+              >,
+            }
+          : {};
+      const result = updateSubscriptionPreferences({
+        installationId,
+        installSecret,
+        ...prefsBody,
+        ...(body["activeSessionStatus"] === "idle" ||
+        body["activeSessionStatus"] === "running" ||
+        body["activeSessionStatus"] === "paused"
+          ? { activeSessionStatus: body["activeSessionStatus"] }
+          : {}),
+      });
+      return jsonResponse(result, result.ok ? 200 : 401);
+    }
+
+    if (url.pathname === "/api/push/schedule-session") {
+      const result = scheduleSessionCompletion({
+        installationId,
+        installSecret,
+        sessionId: typeof body["sessionId"] === "string" ? body["sessionId"] : "",
+        scheduleVersion: typeof body["scheduleVersion"] === "number" ? body["scheduleVersion"] : 0,
+        kind: body["kind"] === "break" ? "break" : "focus",
+        expectedEndAt: typeof body["expectedEndAt"] === "number" ? body["expectedEndAt"] : 0,
+        minutes: typeof body["minutes"] === "number" ? body["minutes"] : 0,
+        label: typeof body["label"] === "string" ? body["label"] : "",
+      });
+      return jsonResponse(result, result.ok ? 200 : 400);
+    }
+
+    if (url.pathname === "/api/push/cancel-session") {
+      const result = cancelSessionCompletion({
+        installationId,
+        installSecret,
+        ...(typeof body["sessionId"] === "string" ? { sessionId: body["sessionId"] } : {}),
+        ...(typeof body["scheduleVersion"] === "number"
+          ? { scheduleVersion: body["scheduleVersion"] }
+          : {}),
+        nextStatus: body["nextStatus"] === "paused" ? "paused" : "idle",
+      });
+      return jsonResponse(result, result.ok ? 200 : 400);
+    }
+
+    if (url.pathname === "/api/push/test") {
+      const result = await sendTestPush(installationId, installSecret);
+      return jsonResponse(result, result.ok ? 200 : 400);
+    }
   }
 
   if (url.pathname === "/api/sessions/validate" && request.method === "POST") {

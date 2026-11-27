@@ -212,7 +212,7 @@ export async function syncPendingSessions(options: {
       query(collection(db, "user_competitions"), where("userId", "==", options.uid)),
     );
     joinedCompetitions = userCompsSnap.docs.map((d) => ({
-      competitionId: String(d.data().competitionId),
+      competitionId: String(d.data()["competitionId"]),
     }));
   } catch {
     joinedCompetitions = [];

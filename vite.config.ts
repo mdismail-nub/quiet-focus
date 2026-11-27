@@ -25,6 +25,9 @@ export default defineConfig({
   },
   plugins: [
     VitePWA({
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
       registerType: "autoUpdate",
       outDir: pwaOutDir,
       includeAssets: [
@@ -33,6 +36,10 @@ export default defineConfig({
         "pwa-192x192.png",
         "pwa-512x512.png",
         "pwa-maskable-512x512.png",
+        "mascots/focus.jpg",
+        "mascots/motivation.jpg",
+        "mascots/complete.jpg",
+        "mascots/break.jpg",
       ],
       manifest: {
         id: "/",
@@ -65,71 +72,10 @@ export default defineConfig({
           },
         ],
       },
-      workbox: {
+      injectManifest: {
         globDirectory: pwaOutDir,
-        navigateFallback: null,
-        cleanupOutdatedCaches: true,
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
-        globPatterns: ["**/*.{js,css,ico,png,svg,woff,woff2,webmanifest}"],
-        runtimeCaching: [
-          {
-            urlPattern: ({ request }) => request.mode === "navigate",
-            handler: "NetworkFirst",
-            options: {
-              cacheName: "pages-cache",
-              networkTimeoutSeconds: 3,
-              expiration: {
-                maxEntries: 20,
-                maxAgeSeconds: 60 * 60 * 24 * 30,
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-            },
-          },
-          {
-            urlPattern: ({ url }) => url.pathname.startsWith("/assets/"),
-            handler: "CacheFirst",
-            options: {
-              cacheName: "app-assets-cache",
-              expiration: {
-                maxEntries: 60,
-                maxAgeSeconds: 60 * 60 * 24 * 365,
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-            },
-          },
-          {
-            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "google-fonts-cache",
-              expiration: {
-                maxEntries: 10,
-                maxAgeSeconds: 60 * 60 * 24 * 365,
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-            },
-          },
-          {
-            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "gstatic-fonts-cache",
-              expiration: {
-                maxEntries: 10,
-                maxAgeSeconds: 60 * 60 * 24 * 365,
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-            },
-          },
-        ],
+        globPatterns: ["**/*.{js,css,ico,png,jpg,svg,woff,woff2,webmanifest}"],
       },
       devOptions: {
         enabled: true,

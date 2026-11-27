@@ -1,11 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { Check, Minus, Plus, Volume2, VolumeX } from "lucide-react";
+import { Bell, Check, Minus, Plus, Volume2, VolumeX } from "lucide-react";
 import { useFocus } from "@/lib/focus-store";
 import { formatClock } from "@/lib/stats";
 import type { Ambient } from "@/lib/ambient";
 import { useOrientationImmersive } from "@/lib/use-orientation";
 import { LandscapeFocus } from "@/components/LandscapeFocus";
+import { NotificationOnboarding } from "@/components/NotificationOnboarding";
 import { BottomNav, Header, PillButton, Sheet } from "@/components/ui-kit";
 import { TimerRing } from "@/components/TimerRing";
 import { cn } from "@/lib/utils";
@@ -304,7 +305,16 @@ function AmbientSheet({ open, onClose }: { open: boolean; onClose: () => void })
 
 function Completed({ onImmersive }: { onImmersive: () => void }) {
   const f = useFocus();
-  const { settings, timer, gamification } = f;
+  const { settings, timer, gamification, notificationPrefs, notificationPermission } = f;
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+
+  const showBreakOffer = settings.pomodoro || notificationPrefs.breakReminders;
+  const showOnboardingCard =
+    !notificationPrefs.enabled &&
+    !notificationPrefs.onboardingCompleted &&
+    !notificationPrefs.onboardingDismissed &&
+    notificationPermission === "default";
+
   return (
     <div className="screen-in mx-auto flex min-h-dvh w-full max-w-md flex-col">
       <Header onImmersive={onImmersive} />
@@ -331,13 +341,45 @@ function Completed({ onImmersive }: { onImmersive: () => void }) {
         <p className="mt-2 rounded-full bg-primary-soft px-3.5 py-1 text-xs font-semibold text-primary">
           +{timer.minutes} XP · Level {gamification.levelInfo.level} {gamification.levelInfo.title}
         </p>
+
+        {showOnboardingCard && (
+          <div className="mt-6 w-full rounded-[22px] border border-border bg-card p-4 text-left">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <Bell className="mt-0.5 size-4 shrink-0 text-primary" />
+                <div>
+                  <p className="text-sm font-semibold">Want gentle focus reminders?</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Get break nudges and warm daily check-ins on your schedule.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setOnboardingOpen(true)}
+                className="press min-h-9 rounded-full bg-primary px-3.5 text-xs font-semibold text-primary-foreground"
+              >
+                Set up reminders
+              </button>
+              <button
+                type="button"
+                onClick={() => f.setNotificationPrefs({ onboardingDismissed: true })}
+                className="press min-h-9 rounded-full px-3 text-xs font-medium text-muted-foreground hover:text-foreground"
+              >
+                No thanks
+              </button>
+            </div>
+          </div>
+        )}
       </div>
       <div className="space-y-1.5 pb-6">
-        {settings.pomodoro && (
+        {showBreakOffer && (
           <PillButton onClick={f.startBreak}>Start {settings.breakMinutes} min break</PillButton>
         )}
         <PillButton
-          variant={settings.pomodoro ? "outline" : "primary"}
+          variant={showBreakOffer ? "outline" : "primary"}
           onClick={() => {
             f.dismiss();
             f.start();
@@ -349,6 +391,7 @@ function Completed({ onImmersive }: { onImmersive: () => void }) {
           Back to home
         </PillButton>
       </div>
+      <NotificationOnboarding open={onboardingOpen} onClose={() => setOnboardingOpen(false)} />
     </div>
   );
 }
