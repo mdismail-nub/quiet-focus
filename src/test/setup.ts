@@ -1,4 +1,9 @@
 import "@testing-library/jest-dom/vitest";
+import { vi } from "vitest";
+
+vi.mock("virtual:pwa-register", () => ({
+  registerSW: () => () => {},
+}));
 
 Object.defineProperty(window, "scrollTo", {
   writable: true,
@@ -15,6 +20,6 @@ Object.defineProperty(window, "matchMedia", {
     removeListener: () => {},
     addEventListener: () => {},
     removeEventListener: () => {},
-    dispatchEvent: () => {},
+    dispatchEvent: () => true,
   }),
 });

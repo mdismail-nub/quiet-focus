@@ -1,13 +1,30 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { remainingMs, type Session } from "./stats";
 import { startAmbient, type Ambient } from "./ambient";
 
 export type Theme = "light" | "dark" | "system";
 export type LandscapeTheme = "minimal" | "midnight" | "sunset" | "forest";
 export type Settings = {
-  defaultMinutes: number; customMinutes: number; sound: boolean; notify: boolean; theme: Theme;
-  landscapeTheme: LandscapeTheme; ambient: Ambient; pomodoro: boolean; breakMinutes: number;
-  dailyGoal: number; keepAwake: boolean;
+  defaultMinutes: number;
+  customMinutes: number;
+  sound: boolean;
+  notify: boolean;
+  theme: Theme;
+  landscapeTheme: LandscapeTheme;
+  ambient: Ambient;
+  pomodoro: boolean;
+  breakMinutes: number;
+  dailyGoal: number;
+  keepAwake: boolean;
 };
 export type Timer = {
   minutes: number;
@@ -20,10 +37,27 @@ export type Timer = {
 };
 
 const DEFAULT_SETTINGS: Settings = {
-  defaultMinutes: 25, customMinutes: 15, sound: true, notify: false, theme: "system",
-  landscapeTheme: "minimal", ambient: "off", pomodoro: false, breakMinutes: 5, dailyGoal: 120, keepAwake: true,
+  defaultMinutes: 25,
+  customMinutes: 15,
+  sound: true,
+  notify: false,
+  theme: "system",
+  landscapeTheme: "minimal",
+  ambient: "off",
+  pomodoro: false,
+  breakMinutes: 5,
+  dailyGoal: 120,
+  keepAwake: true,
 };
-const idle = (m: number, label = ""): Timer => ({ minutes: m, kind: "focus", focusMinutes: m, label, status: "idle", endAt: 0, leftMs: m * 60000 });
+const idle = (m: number, label = ""): Timer => ({
+  minutes: m,
+  kind: "focus",
+  focusMinutes: m,
+  label,
+  status: "idle",
+  endAt: 0,
+  leftMs: m * 60000,
+});
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -71,13 +105,18 @@ function chime() {
       o.start(t);
       o.stop(t + 1);
     });
-  } catch {}
+  } catch {
+    // AudioContext may be unavailable or blocked before user gesture.
+  }
 }
 
 function notify(title: string, body: string) {
   try {
-    if ("Notification" in window && Notification.permission === "granted") new Notification(title, { body });
-  } catch {}
+    if ("Notification" in window && Notification.permission === "granted")
+      new Notification(title, { body });
+  } catch {
+    // Notifications may be unsupported in this environment.
+  }
 }
 
 export function FocusProvider({ children }: { children: ReactNode }) {
@@ -94,20 +133,34 @@ export function FocusProvider({ children }: { children: ReactNode }) {
     const s = load("focus.settings", DEFAULT_SETTINGS);
     setSettingsState(s);
     let ss: Session[] = [];
-    try { ss = JSON.parse(localStorage.getItem("focus.sessions") ?? "[]"); } catch {}
+    try {
+      ss = JSON.parse(localStorage.getItem("focus.sessions") ?? "[]");
+    } catch {
+      ss = [];
+    }
     setSessions(ss);
     setTimer(load("focus.timer", idle(s.defaultMinutes)));
     setReady(true);
   }, []);
 
-  useEffect(() => { if (ready) localStorage.setItem("focus.settings", JSON.stringify(settings)); }, [settings, ready]);
-  useEffect(() => { if (ready) localStorage.setItem("focus.timer", JSON.stringify(timer)); }, [timer, ready]);
-  useEffect(() => { if (ready) localStorage.setItem("focus.sessions", JSON.stringify(sessions)); }, [sessions, ready]);
+  useEffect(() => {
+    if (ready) localStorage.setItem("focus.settings", JSON.stringify(settings));
+  }, [settings, ready]);
+  useEffect(() => {
+    if (ready) localStorage.setItem("focus.timer", JSON.stringify(timer));
+  }, [timer, ready]);
+  useEffect(() => {
+    if (ready) localStorage.setItem("focus.sessions", JSON.stringify(sessions));
+  }, [sessions, ready]);
 
   useEffect(() => {
     const root = document.documentElement;
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const apply = () => root.classList.toggle("dark", settings.theme === "dark" || (settings.theme === "system" && mq.matches));
+    const apply = () =>
+      root.classList.toggle(
+        "dark",
+        settings.theme === "dark" || (settings.theme === "system" && mq.matches),
+      );
     apply();
     mq.addEventListener("change", apply);
     return () => mq.removeEventListener("change", apply);
@@ -135,11 +188,21 @@ export function FocusProvider({ children }: { children: ReactNode }) {
     let alive = true;
     const get = () => {
       if (document.visibilityState !== "visible") return;
-      navigator.wakeLock.request("screen").then((l) => { if (alive) lock = l; else l.release(); }).catch(() => {});
+      navigator.wakeLock
+        .request("screen")
+        .then((l) => {
+          if (alive) lock = l;
+          else l.release();
+        })
+        .catch(() => {});
     };
     get();
     document.addEventListener("visibilitychange", get);
-    return () => { alive = false; document.removeEventListener("visibilitychange", get); lock?.release().catch(() => {}); };
+    return () => {
+      alive = false;
+      document.removeEventListener("visibilitychange", get);
+      lock?.release().catch(() => {});
+    };
   }, [running, settings.keepAwake]);
 
   // Completion detection, computed from the end timestamp so it never drifts.
@@ -152,31 +215,72 @@ export function FocusProvider({ children }: { children: ReactNode }) {
       if (st.notify) notify("Break is over", "Ready for the next session?");
       return;
     }
-    setSessions((s) => [...s, { endedAt: timer.endAt, minutes: timer.minutes, ...(timer.label ? { label: timer.label } : {}) }]);
+    setSessions((s) => [
+      ...s,
+      {
+        endedAt: timer.endAt,
+        minutes: timer.minutes,
+        ...(timer.label ? { label: timer.label } : {}),
+      },
+    ]);
     setTimer((t) => ({ ...t, status: "completed", leftMs: 0 }));
     if (st.notify) notify("Session completed!", `You focused for ${timer.minutes} minutes.`);
   }, [now, timer]);
 
   const left = running ? remainingMs(timer.endAt, now) : timer.leftMs;
 
-  const setSettings = useCallback((p: Partial<Settings>) => setSettingsState((s) => ({ ...s, ...p })), []);
-  const value = useMemo<Ctx>(() => ({
-    ready, settings, setSettings, timer, left, sessions, immersiveManual, setImmersiveManual,
-    selectMinutes: (m) => setTimer((t) => idle(m, t.label)),
-    setLabel: (label) => setTimer((t) => ({ ...t, label })),
-    start: () => { const n = Date.now(); setNow(n); setTimer((t) => ({ ...idle(t.focusMinutes, t.label), status: "running", endAt: n + t.focusMinutes * 60000 })); },
-    startBreak: () => {
-      const n = Date.now(); setNow(n);
-      const b = settingsRef.current.breakMinutes;
-      setTimer((t) => ({ ...t, kind: "break", minutes: b, status: "running", endAt: n + b * 60000, leftMs: b * 60000 }));
-    },
-    pause: () => setTimer((t) => ({ ...t, status: "paused", leftMs: remainingMs(t.endAt, Date.now()) })),
-    resume: () => { const n = Date.now(); setNow(n); setTimer((t) => ({ ...t, status: "running", endAt: n + t.leftMs })); },
-    reset: () => setTimer((t) => idle(t.focusMinutes, t.label)),
-    end: () => setTimer((t) => idle(t.focusMinutes, t.label)),
-    dismiss: () => setTimer((t) => idle(t.focusMinutes, t.label)),
-    clearStats: () => setSessions([]),
-  }), [ready, settings, setSettings, timer, left, sessions, immersiveManual]);
+  const setSettings = useCallback(
+    (p: Partial<Settings>) => setSettingsState((s) => ({ ...s, ...p })),
+    [],
+  );
+  const value = useMemo<Ctx>(
+    () => ({
+      ready,
+      settings,
+      setSettings,
+      timer,
+      left,
+      sessions,
+      immersiveManual,
+      setImmersiveManual,
+      selectMinutes: (m) => setTimer((t) => idle(m, t.label)),
+      setLabel: (label) => setTimer((t) => ({ ...t, label })),
+      start: () => {
+        const n = Date.now();
+        setNow(n);
+        setTimer((t) => ({
+          ...idle(t.focusMinutes, t.label),
+          status: "running",
+          endAt: n + t.focusMinutes * 60000,
+        }));
+      },
+      startBreak: () => {
+        const n = Date.now();
+        setNow(n);
+        const b = settingsRef.current.breakMinutes;
+        setTimer((t) => ({
+          ...t,
+          kind: "break",
+          minutes: b,
+          status: "running",
+          endAt: n + b * 60000,
+          leftMs: b * 60000,
+        }));
+      },
+      pause: () =>
+        setTimer((t) => ({ ...t, status: "paused", leftMs: remainingMs(t.endAt, Date.now()) })),
+      resume: () => {
+        const n = Date.now();
+        setNow(n);
+        setTimer((t) => ({ ...t, status: "running", endAt: n + t.leftMs }));
+      },
+      reset: () => setTimer((t) => idle(t.focusMinutes, t.label)),
+      end: () => setTimer((t) => idle(t.focusMinutes, t.label)),
+      dismiss: () => setTimer((t) => idle(t.focusMinutes, t.label)),
+      clearStats: () => setSessions([]),
+    }),
+    [ready, settings, setSettings, timer, left, sessions, immersiveManual],
+  );
 
   return <FocusCtx.Provider value={value}>{children}</FocusCtx.Provider>;
 }

@@ -13,6 +13,7 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { FocusProvider } from "../lib/focus-store";
+import { OfflineIndicator } from "../components/PWAControls";
 
 function NotFoundComponent() {
   return (
@@ -76,30 +77,36 @@ function ErrorComponent({ error, reset }: ErrorComponentProps) {
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   head: () => ({
-    // Replace these placeholders with the app's name and description when first building the app.
-    // Each content route, / included, must still set its own head(). Never add og:image or
-    // twitter:image here: every page without its own would inherit the root's preview image.
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Focus — a quiet focus timer" },
       { name: "description", content: "A minimal timer to start focusing and get to work." },
-      { name: "author", content: "Lovable" },
+      { name: "theme-color", content: "#f5f5f5" },
+      { name: "mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-status-bar-style", content: "default" },
+      { name: "apple-mobile-web-app-title", content: "Focus" },
+      { name: "author", content: "Focus" },
       { property: "og:title", content: "Focus — a quiet focus timer" },
       { property: "og:description", content: "A minimal timer to start focusing and get to work." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:site", content: "@Lovable" },
     ],
     links: [
       {
         rel: "stylesheet",
         href: appCss,
       },
+      { rel: "manifest", href: "/manifest.webmanifest" },
+      { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
       { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
-      { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" },
+      {
+        rel: "stylesheet",
+        href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap",
+      },
     ],
   }),
   shellComponent: RootShell,
@@ -125,10 +132,43 @@ function RootShell({ children }: { children: ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    let active = true;
+    import("virtual:pwa-register")
+      .then(({ registerSW }) => {
+        if (!active) return;
+        registerSW({
+          immediate: true,
+          onRegisteredSW: async () => {
+            if (!navigator.onLine || typeof caches === "undefined") return;
+            try {
+              const cache = await caches.open("pages-cache");
+              await Promise.all(
+                ["/", "/progress", "/settings"].map(async (path) => {
+                  const res = await fetch(path, { credentials: "same-origin" });
+                  if (res.ok) await cache.put(path, res);
+                }),
+              );
+            } catch {
+              // Offline cache warm-up is best-effort.
+            }
+          },
+        });
+      })
+      .catch(() => {
+        // Ignore service worker registration errors in unsupported environments.
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <FocusProvider>
+        <OfflineIndicator />
         <div className="mx-auto w-full max-w-md px-6">
           <Outlet />
         </div>

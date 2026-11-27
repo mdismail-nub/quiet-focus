@@ -1,4 +1,5 @@
 <!-- LOVABLE:BEGIN -->
+
 > [!IMPORTANT]
 > This project is connected to [Lovable](https://lovable.dev). Avoid rewriting
 > published git history — force pushing, or rebasing/amending/squashing commits
@@ -27,9 +28,11 @@ use the editor.
   `LOVABLE_API_KEY`. When Lovable does not provide one, users can bring their
   own key and store it in Secrets.
 - **Secrets.** Lovable manages them. Do not put secret values in the repo.
+
 <!-- LOVABLE:END -->
 
 ## Focus app
+
 - All timer/settings/session state lives in src/lib/focus-store.tsx (React context, localStorage); why: no backend in v1, state must survive navigation and refresh.
 - Remaining time is always derived from a stored end timestamp, never decremented per tick; why: no drift.
 - Stats math lives in src/lib/stats.ts with tests in src/test/stats.test.ts.

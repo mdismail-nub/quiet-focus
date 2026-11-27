@@ -129,16 +129,127 @@
 }
 
 @utility press {
-  transition: transform 120ms ease, background-color 150ms, color 150ms;
-  &:active { transform: scale(0.97); }
+  transition:
+    transform 120ms ease,
+    background-color 150ms,
+    color 150ms;
+  &:active {
+    transform: scale(0.97);
+  }
 }
-@utility screen-in { animation: screen-in 320ms ease-out both; }
-@utility done-pop { animation: done-pop 520ms cubic-bezier(.2,.9,.3,1) both; }
-@utility done-pulse { animation: done-pulse 1.6s ease-out 300ms both; }
-@keyframes screen-in { from { opacity: 0; transform: translateY(6px); } }
-@keyframes done-pop { from { opacity: 0; transform: scale(.6); } }
-@keyframes done-pulse { 0% { opacity: .9; transform: scale(.7); } 100% { opacity: 0; transform: scale(1.5); } }
-@media (prefers-reduced-motion: reduce) { .screen-in, .done-pop, .done-pulse { animation: none; } }
+@utility screen-in {
+  animation: screen-in 320ms ease-out both;
+}
+@utility landscape-in {
+  animation: landscape-in 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@utility done-pop {
+  animation: done-pop 520ms cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+@utility done-pulse {
+  animation: done-pulse 1.6s ease-out 300ms both;
+}
+@keyframes screen-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@keyframes landscape-in {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+}
+@keyframes done-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+@keyframes done-pulse {
+  0% {
+    opacity: 0.9;
+    transform: scale(0.7);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}
+
+.landscape-minimal {
+  --lf-bg: radial-gradient(ellipse at 50% 42%, #fbf8f1 0%, #f5efe4 68%, #ede4d4 100%);
+  --lf-fg: #231f1a;
+  --lf-muted: #736a5f;
+  --lf-accent: #c6783a;
+  --lf-track: rgba(35, 31, 26, 0.11);
+  --lf-surface: rgba(35, 31, 26, 0.06);
+  --lf-surface-strong: rgba(35, 31, 26, 0.11);
+  --lf-pill-bg: #231f1a;
+  --lf-pill-fg: #fbf8f1;
+  --lf-sheet: #fbf8f1;
+  --lf-border: rgba(35, 31, 26, 0.12);
+}
+
+.landscape-midnight {
+  --lf-bg: radial-gradient(ellipse at 50% 38%, #16223b 0%, #0e1525 60%, #090d17 100%);
+  --lf-fg: #eff3fa;
+  --lf-muted: #8f9eb8;
+  --lf-accent: #7ca8ff;
+  --lf-track: rgba(239, 243, 250, 0.12);
+  --lf-surface: rgba(239, 243, 250, 0.08);
+  --lf-surface-strong: rgba(239, 243, 250, 0.14);
+  --lf-pill-bg: #eff3fa;
+  --lf-pill-fg: #0b101d;
+  --lf-sheet: #131c31;
+  --lf-border: rgba(239, 243, 250, 0.14);
+}
+
+.landscape-sunset {
+  --lf-bg: radial-gradient(ellipse at 50% 30%, #fdebe0 0%, #fad6be 55%, #f3b590 100%);
+  --lf-fg: #2e1911;
+  --lf-muted: #7c4d3b;
+  --lf-accent: #d85a22;
+  --lf-track: rgba(46, 25, 17, 0.12);
+  --lf-surface: rgba(46, 25, 17, 0.07);
+  --lf-surface-strong: rgba(46, 25, 17, 0.13);
+  --lf-pill-bg: #2e1911;
+  --lf-pill-fg: #fdebe0;
+  --lf-sheet: #fceee4;
+  --lf-border: rgba(46, 25, 17, 0.12);
+}
+
+.landscape-forest {
+  --lf-bg: radial-gradient(ellipse at 50% 40%, #22352a 0%, #17251d 62%, #111b15 100%);
+  --lf-fg: #ecf1ec;
+  --lf-muted: #98ad9b;
+  --lf-accent: #82b88e;
+  --lf-track: rgba(236, 241, 236, 0.12);
+  --lf-surface: rgba(236, 241, 236, 0.08);
+  --lf-surface-strong: rgba(236, 241, 236, 0.14);
+  --lf-pill-bg: #ecf1ec;
+  --lf-pill-fg: #131e17;
+  --lf-sheet: #1b2b22;
+  --lf-border: rgba(236, 241, 236, 0.14);
+}
+
+.landscape-stage {
+  background: var(--lf-bg);
+  color: var(--lf-fg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .screen-in,
+  .landscape-in,
+  .done-pop,
+  .done-pulse {
+    animation: none;
+  }
+  .motion-safe-transition {
+    transition: none !important;
+  }
+}
 
 @layer base {
   * {
