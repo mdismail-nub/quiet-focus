@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeStats, remainingMs } from "../lib/stats";
+import { computeStats, goalProgress, remainingMs } from "../lib/stats";
 
 const day = 86400000;
 const now = new Date(2026, 10, 27, 15).getTime();
@@ -18,5 +18,9 @@ describe("stats", () => {
   it("remaining time comes from the end timestamp, not ticks", () => {
     expect(remainingMs(now + 5000, now)).toBe(5000);
     expect(remainingMs(now - 5000, now)).toBe(0);
+  });
+  it("daily goal progress is capped at 100%", () => {
+    expect(goalProgress(60, 120)).toBe(0.5);
+    expect(goalProgress(200, 120)).toBe(1);
   });
 });

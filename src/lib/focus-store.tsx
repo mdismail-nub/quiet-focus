@@ -1,17 +1,29 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { remainingMs, type Session } from "./stats";
+import { startAmbient, type Ambient } from "./ambient";
 
 export type Theme = "light" | "dark" | "system";
-export type Settings = { defaultMinutes: number; customMinutes: number; sound: boolean; notify: boolean; theme: Theme };
+export type LandscapeTheme = "minimal" | "midnight" | "sunset" | "forest";
+export type Settings = {
+  defaultMinutes: number; customMinutes: number; sound: boolean; notify: boolean; theme: Theme;
+  landscapeTheme: LandscapeTheme; ambient: Ambient; pomodoro: boolean; breakMinutes: number;
+  dailyGoal: number; keepAwake: boolean;
+};
 export type Timer = {
   minutes: number;
+  kind: "focus" | "break";
+  focusMinutes: number; // focus length to return to after a break
+  label: string;
   status: "idle" | "running" | "paused" | "completed";
-  endAt: number; // when running
-  leftMs: number; // when paused/idle
+  endAt: number;
+  leftMs: number;
 };
 
-const DEFAULT_SETTINGS: Settings = { defaultMinutes: 25, customMinutes: 15, sound: true, notify: false, theme: "system" };
-const idle = (m: number): Timer => ({ minutes: m, status: "idle", endAt: 0, leftMs: m * 60000 });
+const DEFAULT_SETTINGS: Settings = {
+  defaultMinutes: 25, customMinutes: 15, sound: true, notify: false, theme: "system",
+  landscapeTheme: "minimal", ambient: "off", pomodoro: false, breakMinutes: 5, dailyGoal: 120, keepAwake: true,
+};
+const idle = (m: number, label = ""): Timer => ({ minutes: m, kind: "focus", focusMinutes: m, label, status: "idle", endAt: 0, leftMs: m * 60000 });
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -30,13 +42,17 @@ type Ctx = {
   left: number;
   sessions: Session[];
   selectMinutes: (m: number) => void;
+  setLabel: (l: string) => void;
   start: () => void;
+  startBreak: () => void;
   pause: () => void;
   resume: () => void;
   reset: () => void;
   end: () => void;
   dismiss: () => void;
   clearStats: () => void;
+  immersiveManual: boolean;
+  setImmersiveManual: (v: boolean) => void;
 };
 const FocusCtx = createContext<Ctx | null>(null);
 
@@ -58,12 +74,19 @@ function chime() {
   } catch {}
 }
 
+function notify(title: string, body: string) {
+  try {
+    if ("Notification" in window && Notification.permission === "granted") new Notification(title, { body });
+  } catch {}
+}
+
 export function FocusProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [settings, setSettingsState] = useState<Settings>(DEFAULT_SETTINGS);
   const [timer, setTimer] = useState<Timer>(idle(25));
   const [sessions, setSessions] = useState<Session[]>([]);
   const [now, setNow] = useState(() => Date.now());
+  const [immersiveManual, setImmersiveManual] = useState(false);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
 
@@ -90,40 +113,70 @@ export function FocusProvider({ children }: { children: ReactNode }) {
     return () => mq.removeEventListener("change", apply);
   }, [settings.theme]);
 
+  const running = timer.status === "running";
+
   useEffect(() => {
-    if (timer.status !== "running") return;
+    if (!running) return;
     const id = setInterval(() => setNow(Date.now()), 250);
     setNow(Date.now());
     return () => clearInterval(id);
-  }, [timer.status]);
+  }, [running]);
+
+  // Ambient sound only while a focus session runs.
+  useEffect(() => {
+    if (!running || timer.kind !== "focus" || settings.ambient === "off") return;
+    return startAmbient(settings.ambient);
+  }, [running, timer.kind, settings.ambient]);
+
+  // Keep the screen on during sessions where the Wake Lock API exists; re-acquire after tab switches.
+  useEffect(() => {
+    if (!running || !settings.keepAwake || !("wakeLock" in navigator)) return;
+    let lock: WakeLockSentinel | null = null;
+    let alive = true;
+    const get = () => {
+      if (document.visibilityState !== "visible") return;
+      navigator.wakeLock.request("screen").then((l) => { if (alive) lock = l; else l.release(); }).catch(() => {});
+    };
+    get();
+    document.addEventListener("visibilitychange", get);
+    return () => { alive = false; document.removeEventListener("visibilitychange", get); lock?.release().catch(() => {}); };
+  }, [running, settings.keepAwake]);
 
   // Completion detection, computed from the end timestamp so it never drifts.
   useEffect(() => {
-    if (timer.status === "running" && remainingMs(timer.endAt, now) === 0) {
-      setSessions((s) => [...s, { endedAt: timer.endAt, minutes: timer.minutes }]);
-      setTimer((t) => ({ ...t, status: "completed", leftMs: 0 }));
-      const st = settingsRef.current;
-      if (st.sound) chime();
-      if (st.notify && "Notification" in window && Notification.permission === "granted") {
-        new Notification("Session completed!", { body: `You focused for ${timer.minutes} minutes.` });
-      }
+    if (timer.status !== "running" || remainingMs(timer.endAt, now) > 0) return;
+    const st = settingsRef.current;
+    if (st.sound) chime();
+    if (timer.kind === "break") {
+      setTimer(idle(timer.focusMinutes, timer.label));
+      if (st.notify) notify("Break is over", "Ready for the next session?");
+      return;
     }
+    setSessions((s) => [...s, { endedAt: timer.endAt, minutes: timer.minutes, ...(timer.label ? { label: timer.label } : {}) }]);
+    setTimer((t) => ({ ...t, status: "completed", leftMs: 0 }));
+    if (st.notify) notify("Session completed!", `You focused for ${timer.minutes} minutes.`);
   }, [now, timer]);
 
-  const left = timer.status === "running" ? remainingMs(timer.endAt, now) : timer.leftMs;
+  const left = running ? remainingMs(timer.endAt, now) : timer.leftMs;
 
   const setSettings = useCallback((p: Partial<Settings>) => setSettingsState((s) => ({ ...s, ...p })), []);
   const value = useMemo<Ctx>(() => ({
-    ready, settings, setSettings, timer, left, sessions,
-    selectMinutes: (m) => setTimer(idle(m)),
-    start: () => { const n = Date.now(); setNow(n); setTimer((t) => ({ ...t, status: "running", endAt: n + t.minutes * 60000 })); },
+    ready, settings, setSettings, timer, left, sessions, immersiveManual, setImmersiveManual,
+    selectMinutes: (m) => setTimer((t) => idle(m, t.label)),
+    setLabel: (label) => setTimer((t) => ({ ...t, label })),
+    start: () => { const n = Date.now(); setNow(n); setTimer((t) => ({ ...idle(t.focusMinutes, t.label), status: "running", endAt: n + t.focusMinutes * 60000 })); },
+    startBreak: () => {
+      const n = Date.now(); setNow(n);
+      const b = settingsRef.current.breakMinutes;
+      setTimer((t) => ({ ...t, kind: "break", minutes: b, status: "running", endAt: n + b * 60000, leftMs: b * 60000 }));
+    },
     pause: () => setTimer((t) => ({ ...t, status: "paused", leftMs: remainingMs(t.endAt, Date.now()) })),
     resume: () => { const n = Date.now(); setNow(n); setTimer((t) => ({ ...t, status: "running", endAt: n + t.leftMs })); },
-    reset: () => setTimer((t) => idle(t.minutes)),
-    end: () => setTimer((t) => idle(t.minutes)),
-    dismiss: () => setTimer((t) => idle(t.minutes)),
+    reset: () => setTimer((t) => idle(t.focusMinutes, t.label)),
+    end: () => setTimer((t) => idle(t.focusMinutes, t.label)),
+    dismiss: () => setTimer((t) => idle(t.focusMinutes, t.label)),
     clearStats: () => setSessions([]),
-  }), [ready, settings, setSettings, timer, left, sessions]);
+  }), [ready, settings, setSettings, timer, left, sessions, immersiveManual]);
 
   return <FocusCtx.Provider value={value}>{children}</FocusCtx.Provider>;
 }

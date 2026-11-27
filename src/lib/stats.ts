@@ -1,4 +1,4 @@
-export type Session = { endedAt: number; minutes: number };
+export type Session = { endedAt: number; minutes: number; label?: string };
 
 export function dayKey(t: number): string {
   const d = new Date(t);
@@ -49,4 +49,17 @@ export function formatMinutes(m: number): string {
 
 export function remainingMs(endAt: number, now: number): number {
   return Math.max(0, endAt - now);
+}
+
+export function goalProgress(minutes: number, goal: number): number {
+  if (goal <= 0) return 0;
+  return Math.min(1, minutes / goal);
+}
+
+export function formatClock(ms: number): string {
+  const s = Math.ceil(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
