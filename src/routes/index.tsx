@@ -71,7 +71,7 @@ function FocusScreen() {
     : "Choose a duration and begin.";
 
   return (
-    <div className="screen-in flex min-h-dvh flex-col">
+    <div className="screen-in mx-auto flex min-h-dvh w-full max-w-md flex-col">
       <Header onImmersive={enterImmersive} />
 
       <div className="mt-2 flex items-start justify-between gap-4">
@@ -183,7 +183,7 @@ function FocusScreen() {
       <Sheet open={confirmEnd} onClose={() => setConfirmEnd(false)}>
         <h2 className="text-xl font-semibold">End this session?</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          Your progress on this session won't be saved.
+          Your progress on this session won&apos;t be saved.
         </p>
         <div className="mt-6 space-y-2">
           <PillButton
@@ -304,9 +304,9 @@ function AmbientSheet({ open, onClose }: { open: boolean; onClose: () => void })
 
 function Completed({ onImmersive }: { onImmersive: () => void }) {
   const f = useFocus();
-  const { settings, timer } = f;
+  const { settings, timer, gamification } = f;
   return (
-    <div className="screen-in flex min-h-dvh flex-col">
+    <div className="screen-in mx-auto flex min-h-dvh w-full max-w-md flex-col">
       <Header onImmersive={onImmersive} />
       <div className="flex flex-1 flex-col items-center justify-center text-center">
         <div className="relative flex size-28 items-center justify-center">
@@ -327,6 +327,9 @@ function Completed({ onImmersive }: { onImmersive: () => void }) {
               <span className="text-foreground">{timer.label.trim()}</span>
             </>
           ) : null}
+        </p>
+        <p className="mt-2 rounded-full bg-primary-soft px-3.5 py-1 text-xs font-semibold text-primary">
+          +{timer.minutes} XP · Level {gamification.levelInfo.level} {gamification.levelInfo.title}
         </p>
       </div>
       <div className="space-y-1.5 pb-6">

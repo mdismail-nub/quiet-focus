@@ -1,10 +1,10 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import { useFocus, type Theme } from "@/lib/focus-store";
 import type { Ambient } from "@/lib/ambient";
 import { LANDSCAPE_THEMES } from "@/lib/landscape-themes";
-import { Card, Header, PillButton, Sheet } from "@/components/ui-kit";
+import { Card, Header, PillButton, Sheet, SyncStatusChip } from "@/components/ui-kit";
 import { PWAInstallSettingsControl } from "@/components/PWAControls";
 import { cn } from "@/lib/utils";
 
@@ -321,6 +321,29 @@ function SettingsScreen() {
               { v: "system", l: "Auto" },
             ]}
           />
+        </Row>
+      </Card>
+
+      <p className="mt-6 mb-2 px-1 text-xs font-medium text-muted-foreground">Account &amp; sync</p>
+      <Card className="py-1">
+        <Row
+          label={f.profile ? `@${f.profile.username}` : "Profile & leaderboard"}
+          hint={
+            f.user
+              ? `Privacy: ${f.profile?.privacy ?? "public"}`
+              : "Sign in on Social to sync sessions to leaderboards"
+          }
+        >
+          <Link
+            to="/social"
+            className="press flex min-h-11 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+          >
+            Manage
+            <ChevronRight className="size-4" />
+          </Link>
+        </Row>
+        <Row label="Cloud sync status">
+          <SyncStatusChip status={f.syncStatus} pendingCount={f.pendingCount} />
         </Row>
       </Card>
 

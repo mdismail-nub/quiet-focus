@@ -13,7 +13,7 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { FocusProvider } from "../lib/focus-store";
-import { OfflineIndicator } from "../components/PWAControls";
+import { SyncStatusBanner } from "../components/PWAControls";
 
 function NotFoundComponent() {
   return (
@@ -145,7 +145,7 @@ function RootComponent() {
             try {
               const cache = await caches.open("pages-cache");
               await Promise.all(
-                ["/", "/progress", "/settings"].map(async (path) => {
+                ["/", "/progress", "/leaderboard", "/social", "/settings"].map(async (path) => {
                   const res = await fetch(path, { credentials: "same-origin" });
                   if (res.ok) await cache.put(path, res);
                 }),
@@ -168,8 +168,8 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <FocusProvider>
-        <OfflineIndicator />
-        <div className="mx-auto w-full max-w-md px-6">
+        <div className="mx-auto w-full max-w-xl px-5 sm:px-6">
+          <SyncStatusBanner />
           <Outlet />
         </div>
       </FocusProvider>

@@ -1,0 +1,590 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global safety net: deny everything by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidAvatar(avatarId) {
+      return avatarId in ['amber', 'forest', 'midnight', 'sunset', 'slate', 'coral', 'sage', 'stone'];
+    }
+
+    function isValidPrivacy(privacy) {
+      return privacy in ['public', 'friends', 'private'];
+    }
+
+    function isValidUsername(username, usernameLower) {
+      return username is string
+        && username.size() >= 3
+        && username.size() <= 24
+        && username.matches('^[a-zA-Z0-9_]+$')
+        && usernameLower is string
+        && usernameLower.size() >= 3
+        && usernameLower.size() <= 24
+        && usernameLower.matches('^[a-z0-9_]+$')
+        && username.lower() == usernameLower;
+    }
+
+    function friendshipDocId(uidA, uidB) {
+      return uidA < uidB ? (uidA + '__' + uidB) : (uidB + '__' + uidA);
+    }
+
+    function isAcceptedFriend(uidA, uidB) {
+      return exists(/databases/$(database)/documents/friendships/$(friendshipDocId(uidA, uidB)))
+        && get(/databases/$(database)/documents/friendships/$(friendshipDocId(uidA, uidB))).data.status == 'accepted';
+    }
+
+    function isValidUserPrivate(data, userId) {
+      return data.keys().hasAll(['userId', 'email', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['userId', 'email', 'createdAt', 'updatedAt'])
+        && data.userId == userId
+        && data.email is string
+        && data.email.size() >= 3
+        && data.email.size() <= 254
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll([
+          'userId', 'username', 'usernameLower', 'avatarId', 'privacy', 'dailyGoal',
+          'totalMinutes', 'totalSessions', 'xp', 'level', 'currentStreak', 'longestStreak',
+          'lastGoalDayKey', 'dailyKey', 'dailyMinutes', 'weeklyKey', 'weeklyMinutes',
+          'lastSessionId', 'unlockedAchievementIds', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'username', 'usernameLower', 'avatarId', 'privacy', 'dailyGoal',
+          'totalMinutes', 'totalSessions', 'xp', 'level', 'currentStreak', 'longestStreak',
+          'lastGoalDayKey', 'dailyKey', 'dailyMinutes', 'weeklyKey', 'weeklyMinutes',
+          'lastSessionId', 'unlockedAchievementIds', 'createdAt', 'updatedAt'
+        ])
+        && data.userId == userId
+        && isValidUsername(data.username, data.usernameLower)
+        && isValidAvatar(data.avatarId)
+        && isValidPrivacy(data.privacy)
+        && data.dailyGoal is int && data.dailyGoal >= 0 && data.dailyGoal <= 600
+        && data.totalMinutes is int && data.totalMinutes >= 0 && data.totalMinutes <= 10000000
+        && data.totalSessions is int && data.totalSessions >= 0 && data.totalSessions <= 1000000
+        && data.xp is int && data.xp >= 0 && data.xp <= 50000000
+        && data.level is int && data.level >= 1 && data.level <= 5
+        && data.currentStreak is int && data.currentStreak >= 0 && data.currentStreak <= 5000
+        && data.longestStreak is int && data.longestStreak >= data.currentStreak && data.longestStreak <= 5000
+        && data.lastGoalDayKey is string && data.lastGoalDayKey.size() <= 16
+        && data.dailyKey is string && data.dailyKey.size() <= 16
+        && data.dailyMinutes is int && data.dailyMinutes >= 0 && data.dailyMinutes <= 1440
+        && data.weeklyKey is string && data.weeklyKey.size() <= 16
+        && data.weeklyMinutes is int && data.weeklyMinutes >= 0 && data.weeklyMinutes <= 10080
+        && data.lastSessionId is string && data.lastSessionId.size() <= 128
+        && data.unlockedAchievementIds is list
+        && data.unlockedAchievementIds.size() <= 20
+        && (data.unlockedAchievementIds.size() == 0 || data.unlockedAchievementIds[0] is string)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidUsernameClaim(data, usernameLower) {
+      return data.keys().hasAll(['userId', 'username', 'usernameLower', 'createdAt'])
+        && data.keys().hasOnly(['userId', 'username', 'usernameLower', 'createdAt'])
+        && data.userId == request.auth.uid
+        && data.usernameLower == usernameLower
+        && isValidUsername(data.username, data.usernameLower)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidLeaderboardEntry(data, userId) {
+      return data.keys().hasAll([
+          'userId', 'username', 'usernameLower', 'avatarId', 'privacy', 'level',
+          'currentStreak', 'totalMinutes', 'totalSessions', 'dailyKey', 'dailyMinutes',
+          'weeklyKey', 'weeklyMinutes', 'lastSessionId', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'username', 'usernameLower', 'avatarId', 'privacy', 'level',
+          'currentStreak', 'totalMinutes', 'totalSessions', 'dailyKey', 'dailyMinutes',
+          'weeklyKey', 'weeklyMinutes', 'lastSessionId', 'updatedAt'
+        ])
+        && data.userId == userId
+        && isValidUsername(data.username, data.usernameLower)
+        && isValidAvatar(data.avatarId)
+        && isValidPrivacy(data.privacy)
+        && data.level is int && data.level >= 1 && data.level <= 5
+        && data.currentStreak is int && data.currentStreak >= 0 && data.currentStreak <= 5000
+        && data.totalMinutes is int && data.totalMinutes >= 0 && data.totalMinutes <= 10000000
+        && data.totalSessions is int && data.totalSessions >= 0 && data.totalSessions <= 1000000
+        && data.dailyKey is string && data.dailyKey.size() <= 16
+        && data.dailyMinutes is int && data.dailyMinutes >= 0 && data.dailyMinutes <= 1440
+        && data.weeklyKey is string && data.weeklyKey.size() <= 16
+        && data.weeklyMinutes is int && data.weeklyMinutes >= 0 && data.weeklyMinutes <= 10080
+        && data.lastSessionId is string && data.lastSessionId.size() <= 128
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidFocusSession(data, sessionId) {
+      return data.keys().hasAll([
+          'sessionId', 'userId', 'startedAt', 'endedAt', 'minutes',
+          'label', 'dayKey', 'weekKey', 'xpAwarded', 'syncedAt'
+        ])
+        && data.keys().hasOnly([
+          'sessionId', 'userId', 'startedAt', 'endedAt', 'minutes',
+          'label', 'dayKey', 'weekKey', 'xpAwarded', 'syncedAt'
+        ])
+        && data.sessionId == sessionId
+        && data.sessionId.size() >= 8
+        && data.userId == request.auth.uid
+        && data.minutes is int && data.minutes >= 1 && data.minutes <= 240
+        && data.startedAt is int && data.endedAt is int
+        && data.startedAt > 1700000000000
+        && data.endedAt > data.startedAt
+        && data.endedAt <= request.time.toMillis() + 300000
+        && (data.endedAt - data.startedAt) <= 86400000
+        && (data.endedAt - data.startedAt) >= (data.minutes * 60000 - 15000)
+        && data.label is string && data.label.size() <= 60
+        && data.dayKey is string && data.dayKey.size() >= 4 && data.dayKey.size() <= 16
+        && data.weekKey is string && data.weekKey.size() >= 4 && data.weekKey.size() <= 16
+        && data.xpAwarded is int && data.xpAwarded >= 0 && data.xpAwarded <= (data.minutes + 230)
+        && data.syncedAt == request.time;
+    }
+
+    function isValidUserAchievement(data) {
+      return data.keys().hasAll(['userId', 'achievementId', 'unlockedAt', 'createdAt'])
+        && data.keys().hasOnly(['userId', 'achievementId', 'unlockedAt', 'createdAt'])
+        && data.userId == request.auth.uid
+        && data.achievementId is string
+        && data.achievementId.size() >= 2
+        && data.achievementId.size() <= 48
+        && data.achievementId.matches('^[a-z0-9_\\-]+$')
+        && data.unlockedAt is int && data.unlockedAt > 1700000000000
+        && data.unlockedAt <= request.time.toMillis() + 300000
+        && data.createdAt == request.time;
+    }
+
+    function isValidUserChallenge(data) {
+      return data.keys().hasAll(['userId', 'dayKey', 'challengeId', 'xpReward', 'completedAt', 'createdAt'])
+        && data.keys().hasOnly(['userId', 'dayKey', 'challengeId', 'xpReward', 'completedAt', 'createdAt'])
+        && data.userId == request.auth.uid
+        && data.dayKey is string && data.dayKey.size() >= 4 && data.dayKey.size() <= 16
+        && data.challengeId is string
+        && data.challengeId.size() >= 2
+        && data.challengeId.size() <= 48
+        && data.challengeId.matches('^[a-z0-9_\\-]+$')
+        && data.xpReward is int && data.xpReward >= 1 && data.xpReward <= 100
+        && data.completedAt is int && data.completedAt > 1700000000000
+        && data.completedAt <= request.time.toMillis() + 300000
+        && data.createdAt == request.time;
+    }
+
+    function isValidFriendship(data, friendshipId) {
+      return data.keys().hasAll(['id', 'users', 'requesterId', 'recipientId', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'users', 'requesterId', 'recipientId', 'status', 'createdAt', 'updatedAt'])
+        && data.id == friendshipId
+        && data.users is list && data.users.size() == 2
+        && data.users[0] is string && data.users[1] is string
+        && data.users[0] < data.users[1]
+        && friendshipId == (data.users[0] + '__' + data.users[1])
+        && data.requesterId in data.users
+        && data.recipientId in data.users
+        && data.requesterId != data.recipientId
+        && data.status in ['pending', 'accepted', 'rejected']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCompetition(data, competitionId) {
+      return data.keys().hasAll([
+          'id', 'title', 'description', 'inviteCode', 'creatorId',
+          'startDayKey', 'endDayKey', 'memberCount', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'title', 'description', 'inviteCode', 'creatorId',
+          'startDayKey', 'endDayKey', 'memberCount', 'createdAt', 'updatedAt'
+        ])
+        && data.id == competitionId
+        && data.title is string && data.title.size() >= 3 && data.title.size() <= 60
+        && data.description is string && data.description.size() <= 160
+        && data.inviteCode is string && data.inviteCode.size() >= 6 && data.inviteCode.size() <= 16
+        && data.inviteCode.matches('^[A-Z0-9]+$')
+        && isValidId(data.creatorId)
+        && data.startDayKey is string && data.startDayKey.size() <= 16
+        && data.endDayKey is string && data.endDayKey.size() <= 16
+        && data.memberCount is int && data.memberCount >= 1 && data.memberCount <= 200
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCompetitionMember(data, competitionId, memberId) {
+      return data.keys().hasAll([
+          'competitionId', 'userId', 'username', 'avatarId',
+          'totalMinutes', 'sessionsCount', 'lastSessionId', 'joinedAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'competitionId', 'userId', 'username', 'avatarId',
+          'totalMinutes', 'sessionsCount', 'lastSessionId', 'joinedAt', 'updatedAt'
+        ])
+        && data.competitionId == competitionId
+        && data.userId == memberId
+        && data.username is string && data.username.size() >= 3 && data.username.size() <= 24
+        && isValidAvatar(data.avatarId)
+        && data.totalMinutes is int && data.totalMinutes >= 0 && data.totalMinutes <= 1000000
+        && data.sessionsCount is int && data.sessionsCount >= 0 && data.sessionsCount <= 100000
+        && data.lastSessionId is string && data.lastSessionId.size() <= 128
+        && data.joinedAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCompetitionInvite(data, inviteCode) {
+      return data.keys().hasAll(['inviteCode', 'competitionId', 'title', 'creatorId', 'startDayKey', 'endDayKey', 'createdAt'])
+        && data.keys().hasOnly(['inviteCode', 'competitionId', 'title', 'creatorId', 'startDayKey', 'endDayKey', 'createdAt'])
+        && data.inviteCode == inviteCode
+        && data.inviteCode.size() >= 6 && data.inviteCode.size() <= 16
+        && data.inviteCode.matches('^[A-Z0-9]+$')
+        && isValidId(data.competitionId)
+        && data.title is string && data.title.size() >= 3 && data.title.size() <= 60
+        && data.creatorId == request.auth.uid
+        && data.startDayKey is string && data.startDayKey.size() <= 16
+        && data.endDayKey is string && data.endDayKey.size() <= 16
+        && data.createdAt == request.time;
+    }
+
+    function isValidUserCompetition(data, docId) {
+      return data.keys().hasAll(['userId', 'competitionId', 'title', 'inviteCode', 'joinedAt'])
+        && data.keys().hasOnly(['userId', 'competitionId', 'title', 'inviteCode', 'joinedAt'])
+        && data.userId == request.auth.uid
+        && isValidId(data.competitionId)
+        && docId == (request.auth.uid + '_' + data.competitionId)
+        && data.title is string && data.title.size() >= 3 && data.title.size() <= 60
+        && data.inviteCode is string && data.inviteCode.size() >= 6 && data.inviteCode.size() <= 16
+        && data.inviteCode.matches('^[A-Z0-9]+$')
+        && data.joinedAt == request.time;
+    }
+
+    function isValidFocusRoom(data, roomId) {
+      return data.keys().hasAll([
+          'id', 'name', 'hostId', 'visibility', 'sessionMinutes',
+          'status', 'activeCount', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'name', 'hostId', 'visibility', 'sessionMinutes',
+          'status', 'activeCount', 'createdAt', 'updatedAt'
+        ])
+        && data.id == roomId
+        && data.name is string && data.name.size() >= 3 && data.name.size() <= 60
+        && data.hostId == request.auth.uid
+        && data.visibility in ['public', 'invite']
+        && data.sessionMinutes is int && data.sessionMinutes >= 5 && data.sessionMinutes <= 240
+        && data.status in ['waiting', 'focusing', 'break']
+        && data.activeCount is int && data.activeCount >= 0 && data.activeCount <= 500
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function sessionExistsAfter(sessionId) {
+      return isValidId(sessionId)
+        && !exists(/databases/$(database)/documents/focus_sessions/$(sessionId))
+        && existsAfter(/databases/$(database)/documents/focus_sessions/$(sessionId))
+        && getAfter(/databases/$(database)/documents/focus_sessions/$(sessionId)).data.userId == request.auth.uid;
+    }
+
+    // Connection probe path
+    match /test/connection {
+      allow get: if request.auth != null;
+    }
+
+    // PII-isolated private user record
+    match /users_private/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow create: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserPrivate(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserPrivate(incoming(), userId)
+        && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'updatedAt'])
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time;
+    }
+
+    // Unique username index (zero PII)
+    match /usernames/{usernameLower} {
+      allow get: if isSignedIn() && usernameLower is string && usernameLower.size() >= 3 && usernameLower.size() <= 24;
+      allow list: if isSignedIn();
+      allow create: if isSignedIn()
+        && usernameLower is string && usernameLower.size() >= 3 && usernameLower.size() <= 24
+        && !exists(/databases/$(database)/documents/usernames/$(usernameLower))
+        && isValidUsernameClaim(incoming(), usernameLower)
+        && incoming().createdAt == request.time;
+      allow delete: if isSignedIn()
+        && usernameLower is string && usernameLower.size() >= 3 && usernameLower.size() <= 24
+        && existing().userId == request.auth.uid;
+    }
+
+    // User profile & gamification summary
+    match /user_profiles/{userId} {
+      allow get: if isValidId(userId) && isSignedIn() && (
+        request.auth.uid == userId
+        || existing().privacy == 'public'
+        || (existing().privacy == 'friends' && isAcceptedFriend(request.auth.uid, userId))
+      );
+      allow list: if isSignedIn() && (
+        existing().privacy == 'public'
+        || existing().userId == request.auth.uid
+      );
+      allow create: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().totalMinutes == 0
+        && incoming().totalSessions == 0
+        && incoming().xp == 0
+        && incoming().level == 1
+        && incoming().currentStreak == 0
+        && incoming().longestStreak == 0
+        && incoming().dailyMinutes == 0
+        && incoming().weeklyMinutes == 0
+        && incoming().lastSessionId == ''
+        && incoming().unlockedAchievementIds.size() == 0
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action: Update editable preferences/identity only
+          incoming().diff(existing()).affectedKeys().hasOnly(['username', 'usernameLower', 'avatarId', 'privacy', 'dailyGoal', 'updatedAt'])
+          // Action: Sync a newly verified focus session atomically
+          || (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'totalMinutes', 'totalSessions', 'xp', 'level', 'currentStreak', 'longestStreak',
+              'lastGoalDayKey', 'dailyKey', 'dailyMinutes', 'weeklyKey', 'weeklyMinutes',
+              'lastSessionId', 'unlockedAchievementIds', 'updatedAt'
+            ])
+            && incoming().lastSessionId != existing().lastSessionId
+            && sessionExistsAfter(incoming().lastSessionId)
+            && incoming().totalMinutes == existing().totalMinutes + getAfter(/databases/$(database)/documents/focus_sessions/$(incoming().lastSessionId)).data.minutes
+            && incoming().totalSessions == existing().totalSessions + 1
+            && incoming().xp >= existing().xp
+            && incoming().xp <= existing().xp + getAfter(/databases/$(database)/documents/focus_sessions/$(incoming().lastSessionId)).data.minutes + 230
+            && incoming().longestStreak >= existing().longestStreak
+            && incoming().unlockedAchievementIds.hasAll(existing().unlockedAchievementIds)
+          )
+        );
+    }
+
+    // Privacy-aware leaderboard projection
+    match /leaderboard_entries/{userId} {
+      allow get: if isValidId(userId) && isSignedIn() && (
+        request.auth.uid == userId
+        || existing().privacy == 'public'
+        || (existing().privacy == 'friends' && isAcceptedFriend(request.auth.uid, userId))
+      );
+      allow list: if isSignedIn() && (
+        existing().privacy == 'public'
+        || existing().userId == request.auth.uid
+      );
+      allow create: if isValidId(userId)
+        && isOwner(userId)
+        && isValidLeaderboardEntry(incoming(), userId)
+        && incoming().totalMinutes == 0
+        && incoming().totalSessions == 0
+        && incoming().dailyMinutes == 0
+        && incoming().weeklyMinutes == 0
+        && incoming().level == 1
+        && incoming().currentStreak == 0
+        && incoming().lastSessionId == ''
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(userId)
+        && isOwner(userId)
+        && isValidLeaderboardEntry(incoming(), userId)
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['username', 'usernameLower', 'avatarId', 'privacy', 'updatedAt'])
+          || (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'level', 'currentStreak', 'totalMinutes', 'totalSessions',
+              'dailyKey', 'dailyMinutes', 'weeklyKey', 'weeklyMinutes', 'lastSessionId', 'updatedAt'
+            ])
+            && incoming().lastSessionId != existing().lastSessionId
+            && sessionExistsAfter(incoming().lastSessionId)
+            && incoming().totalMinutes == existing().totalMinutes + getAfter(/databases/$(database)/documents/focus_sessions/$(incoming().lastSessionId)).data.minutes
+            && incoming().totalSessions == existing().totalSessions + 1
+          )
+        );
+    }
+
+    // Immutable verified focus sessions (idempotent by sessionId)
+    match /focus_sessions/{sessionId} {
+      allow get: if isValidId(sessionId) && isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+      allow create: if isValidId(sessionId)
+        && isSignedIn()
+        && !exists(/databases/$(database)/documents/focus_sessions/$(sessionId))
+        && isValidFocusSession(incoming(), sessionId);
+      allow update, delete: if false;
+    }
+
+    // Single-grant achievements
+    match /user_achievements/{docId} {
+      allow get: if isValidId(docId) && isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+      allow create: if isValidId(docId)
+        && isSignedIn()
+        && !exists(/databases/$(database)/documents/user_achievements/$(docId))
+        && isValidUserAchievement(incoming())
+        && docId == (request.auth.uid + '_' + incoming().achievementId);
+      allow update, delete: if false;
+    }
+
+    // Single-grant daily challenges
+    match /user_challenges/{docId} {
+      allow get: if isValidId(docId) && isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+      allow create: if isValidId(docId)
+        && isSignedIn()
+        && !exists(/databases/$(database)/documents/user_challenges/$(docId))
+        && isValidUserChallenge(incoming())
+        && docId == (request.auth.uid + '_' + incoming().dayKey + '_' + incoming().challengeId);
+      allow update, delete: if false;
+    }
+
+    // Friendships
+    match /friendships/{friendshipId} {
+      allow get: if isValidId(friendshipId) && isSignedIn() && request.auth.uid in existing().users;
+      allow list: if isSignedIn() && request.auth.uid in existing().users;
+      allow create: if isValidId(friendshipId)
+        && isSignedIn()
+        && !exists(/databases/$(database)/documents/friendships/$(friendshipId))
+        && isValidFriendship(incoming(), friendshipId)
+        && incoming().requesterId == request.auth.uid
+        && incoming().status == 'pending'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(friendshipId)
+        && isSignedIn()
+        && isValidFriendship(incoming(), friendshipId)
+        && existing().status == 'pending'
+        && incoming().status in ['accepted', 'rejected']
+        && request.auth.uid == existing().recipientId
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time;
+      allow delete: if isValidId(friendshipId) && isSignedIn() && request.auth.uid in existing().users;
+    }
+
+    // Private competitions
+    match /competitions/{competitionId} {
+      allow get: if isValidId(competitionId) && isSignedIn() && (
+        existing().creatorId == request.auth.uid
+        || exists(/databases/$(database)/documents/competitions/$(competitionId)/members/$(request.auth.uid))
+      );
+      allow list: if isSignedIn() && existing().creatorId == request.auth.uid;
+      allow create: if isValidId(competitionId)
+        && isSignedIn()
+        && isValidCompetition(incoming(), competitionId)
+        && incoming().creatorId == request.auth.uid
+        && incoming().memberCount == 1
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(competitionId)
+        && isSignedIn()
+        && isValidCompetition(incoming(), competitionId)
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['memberCount', 'updatedAt'])
+        && incoming().memberCount == existing().memberCount + 1
+        && existsAfter(/databases/$(database)/documents/competitions/$(competitionId)/members/$(request.auth.uid));
+
+      match /members/{memberId} {
+        allow get: if isValidId(competitionId) && isValidId(memberId) && isSignedIn() && (
+          request.auth.uid == memberId
+          || exists(/databases/$(database)/documents/competitions/$(competitionId)/members/$(request.auth.uid))
+        );
+        allow list: if isValidId(competitionId) && isSignedIn() && exists(/databases/$(database)/documents/competitions/$(competitionId)/members/$(request.auth.uid));
+        allow create: if isValidId(competitionId)
+          && isValidId(memberId)
+          && isOwner(memberId)
+          && existsAfter(/databases/$(database)/documents/competitions/$(competitionId))
+          && isValidCompetitionMember(incoming(), competitionId, memberId)
+          && incoming().totalMinutes == 0
+          && incoming().sessionsCount == 0
+          && incoming().lastSessionId == ''
+          && incoming().joinedAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(competitionId)
+          && isValidId(memberId)
+          && isOwner(memberId)
+          && isValidCompetitionMember(incoming(), competitionId, memberId)
+          && incoming().joinedAt == existing().joinedAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['totalMinutes', 'sessionsCount', 'lastSessionId', 'updatedAt'])
+          && incoming().lastSessionId != existing().lastSessionId
+          && sessionExistsAfter(incoming().lastSessionId)
+          && incoming().totalMinutes == existing().totalMinutes + getAfter(/databases/$(database)/documents/focus_sessions/$(incoming().lastSessionId)).data.minutes
+          && incoming().sessionsCount == existing().sessionsCount + 1;
+      }
+    }
+
+    // Invite code lookup index
+    match /competition_invites/{inviteCode} {
+      allow get: if isValidId(inviteCode) && isSignedIn();
+      allow create: if isValidId(inviteCode)
+        && isSignedIn()
+        && !exists(/databases/$(database)/documents/competition_invites/$(inviteCode))
+        && isValidCompetitionInvite(incoming(), inviteCode)
+        && existsAfter(/databases/$(database)/documents/competitions/$(incoming().competitionId));
+      allow update, delete: if false;
+    }
+
+    // User's joined competition references
+    match /user_competitions/{docId} {
+      allow get: if isValidId(docId) && isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+      allow create: if isValidId(docId)
+        && isSignedIn()
+        && !exists(/databases/$(database)/documents/user_competitions/$(docId))
+        && isValidUserCompetition(incoming(), docId)
+        && existsAfter(/databases/$(database)/documents/competitions/$(incoming().competitionId)/members/$(request.auth.uid));
+      allow update, delete: if false;
+    }
+
+    // Future-ready focus rooms
+    match /focus_rooms/{roomId} {
+      allow get: if isValidId(roomId) && isSignedIn() && (existing().visibility == 'public' || existing().hostId == request.auth.uid);
+      allow list: if isSignedIn() && existing().visibility == 'public';
+      allow create: if isValidId(roomId)
+        && isSignedIn()
+        && isValidFocusRoom(incoming(), roomId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(roomId)
+        && isSignedIn()
+        && existing().hostId == request.auth.uid
+        && isValidFocusRoom(incoming(), roomId)
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'status', 'sessionMinutes', 'activeCount', 'updatedAt']);
+      allow delete: if isValidId(roomId) && isSignedIn() && existing().hostId == request.auth.uid;
+    }
+  }
+}

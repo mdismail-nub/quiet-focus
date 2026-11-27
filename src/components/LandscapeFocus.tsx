@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Check,
+  CloudOff,
   Maximize,
   Minimize,
   Pause,
@@ -122,6 +123,15 @@ export function LandscapeFocus({ onExit }: { onExit: () => void }) {
             ·
           </span>
           <span className="shrink-0 whitespace-nowrap text-[var(--lf-muted)]">{statusDetail}</span>
+          {(!f.serverOnline || f.pendingCount > 0) && (
+            <span
+              title="Sessions are saved locally and sync automatically when online"
+              className="hidden items-center gap-1 rounded-full bg-[var(--lf-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--lf-muted)] sm:inline-flex"
+            >
+              <CloudOff className="size-3" />
+              {!f.serverOnline ? "Offline" : `${f.pendingCount} queued`}
+            </span>
+          )}
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5">
@@ -182,6 +192,10 @@ export function LandscapeFocus({ onExit }: { onExit: () => void }) {
             <p className="mt-2 text-sm text-[var(--lf-muted)] sm:text-base">
               Focused for {timer.minutes} min
               {timer.label.trim() ? ` · ${timer.label.trim()}` : ""}
+            </p>
+            <p className="mt-2 rounded-full bg-[var(--lf-surface)] px-3 py-1 text-xs font-medium text-[var(--lf-accent)]">
+              +{timer.minutes} XP ·{" "}
+              {f.serverOnline ? "Saved & queued for sync" : "Saved locally offline"}
             </p>
           </div>
         ) : (

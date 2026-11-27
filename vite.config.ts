@@ -69,6 +69,7 @@ export default defineConfig({
         globDirectory: pwaOutDir,
         navigateFallback: null,
         cleanupOutdatedCaches: true,
+        maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         globPatterns: ["**/*.{js,css,ico,png,svg,woff,woff2,webmanifest}"],
         runtimeCaching: [
           {

@@ -1,0 +1,535 @@
+{
+  "entities": {
+    "UserPrivate": {
+      "title": "UserPrivate",
+      "description": "Owner-only private account data containing PII.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": { "type": "string", "format": "email", "maxLength": 254 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "email", "createdAt", "updatedAt"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User gamification profile, stats, privacy preference, and streak summary.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "username": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 24,
+          "pattern": "^[a-zA-Z0-9_]+$"
+        },
+        "usernameLower": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 24,
+          "pattern": "^[a-z0-9_]+$"
+        },
+        "avatarId": {
+          "type": "string",
+          "enum": ["amber", "forest", "midnight", "sunset", "slate", "coral", "sage", "stone"]
+        },
+        "privacy": { "type": "string", "enum": ["public", "friends", "private"] },
+        "dailyGoal": { "type": "integer" },
+        "totalMinutes": { "type": "integer" },
+        "totalSessions": { "type": "integer" },
+        "xp": { "type": "integer" },
+        "level": { "type": "integer" },
+        "currentStreak": { "type": "integer" },
+        "longestStreak": { "type": "integer" },
+        "lastGoalDayKey": { "type": "string", "maxLength": 16 },
+        "dailyKey": { "type": "string", "maxLength": 16 },
+        "dailyMinutes": { "type": "integer" },
+        "weeklyKey": { "type": "string", "maxLength": 16 },
+        "weeklyMinutes": { "type": "integer" },
+        "lastSessionId": { "type": "string", "maxLength": 128 },
+        "unlockedAchievementIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "username",
+        "usernameLower",
+        "avatarId",
+        "privacy",
+        "dailyGoal",
+        "totalMinutes",
+        "totalSessions",
+        "xp",
+        "level",
+        "currentStreak",
+        "longestStreak",
+        "lastGoalDayKey",
+        "dailyKey",
+        "dailyMinutes",
+        "weeklyKey",
+        "weeklyMinutes",
+        "lastSessionId",
+        "unlockedAchievementIds",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UsernameClaim": {
+      "title": "UsernameClaim",
+      "description": "Uniqueness reservation for a normalized username without PII.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "username": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 24,
+          "pattern": "^[a-zA-Z0-9_]+$"
+        },
+        "usernameLower": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 24,
+          "pattern": "^[a-z0-9_]+$"
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "username", "usernameLower", "createdAt"]
+    },
+    "LeaderboardEntry": {
+      "title": "LeaderboardEntry",
+      "description": "Privacy-aware leaderboard projection for daily, weekly, lifetime, and friends rankings.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "username": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 24,
+          "pattern": "^[a-zA-Z0-9_]+$"
+        },
+        "usernameLower": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 24,
+          "pattern": "^[a-z0-9_]+$"
+        },
+        "avatarId": {
+          "type": "string",
+          "enum": ["amber", "forest", "midnight", "sunset", "slate", "coral", "sage", "stone"]
+        },
+        "privacy": { "type": "string", "enum": ["public", "friends", "private"] },
+        "level": { "type": "integer" },
+        "currentStreak": { "type": "integer" },
+        "totalMinutes": { "type": "integer" },
+        "totalSessions": { "type": "integer" },
+        "dailyKey": { "type": "string", "maxLength": 16 },
+        "dailyMinutes": { "type": "integer" },
+        "weeklyKey": { "type": "string", "maxLength": 16 },
+        "weeklyMinutes": { "type": "integer" },
+        "lastSessionId": { "type": "string", "maxLength": 128 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "username",
+        "usernameLower",
+        "avatarId",
+        "privacy",
+        "level",
+        "currentStreak",
+        "totalMinutes",
+        "totalSessions",
+        "dailyKey",
+        "dailyMinutes",
+        "weeklyKey",
+        "weeklyMinutes",
+        "lastSessionId",
+        "updatedAt"
+      ]
+    },
+    "FocusSession": {
+      "title": "FocusSession",
+      "description": "Immutable verified focus session synced from a client device.",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "startedAt": { "type": "integer" },
+        "endedAt": { "type": "integer" },
+        "minutes": { "type": "integer" },
+        "label": { "type": "string", "maxLength": 60 },
+        "dayKey": { "type": "string", "maxLength": 16 },
+        "weekKey": { "type": "string", "maxLength": 16 },
+        "xpAwarded": { "type": "integer" },
+        "syncedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "sessionId",
+        "userId",
+        "startedAt",
+        "endedAt",
+        "minutes",
+        "label",
+        "dayKey",
+        "weekKey",
+        "xpAwarded",
+        "syncedAt"
+      ]
+    },
+    "UserAchievement": {
+      "title": "UserAchievement",
+      "description": "Single-grant unlocked achievement record.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "achievementId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 48,
+          "pattern": "^[a-z0-9_\\-]+$"
+        },
+        "unlockedAt": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "achievementId", "unlockedAt", "createdAt"]
+    },
+    "UserChallenge": {
+      "title": "UserChallenge",
+      "description": "Single-grant daily challenge completion record.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "dayKey": { "type": "string", "maxLength": 16 },
+        "challengeId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 48,
+          "pattern": "^[a-z0-9_\\-]+$"
+        },
+        "xpReward": { "type": "integer" },
+        "completedAt": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "dayKey", "challengeId", "xpReward", "completedAt", "createdAt"]
+    },
+    "Friendship": {
+      "title": "Friendship",
+      "description": "Bidirectional friend request or accepted friendship.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 260,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "users": { "type": "array" },
+        "requesterId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "recipientId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "status": { "type": "string", "enum": ["pending", "accepted", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "users", "requesterId", "recipientId", "status", "createdAt", "updatedAt"]
+    },
+    "Competition": {
+      "title": "Competition",
+      "description": "Private invite-only focus competition.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": { "type": "string", "minLength": 3, "maxLength": 60 },
+        "description": { "type": "string", "maxLength": 160 },
+        "inviteCode": {
+          "type": "string",
+          "minLength": 6,
+          "maxLength": 16,
+          "pattern": "^[A-Z0-9]+$"
+        },
+        "creatorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "startDayKey": { "type": "string", "maxLength": 16 },
+        "endDayKey": { "type": "string", "maxLength": 16 },
+        "memberCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "title",
+        "description",
+        "inviteCode",
+        "creatorId",
+        "startDayKey",
+        "endDayKey",
+        "memberCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CompetitionMember": {
+      "title": "CompetitionMember",
+      "description": "Participant standing inside a private focus competition.",
+      "type": "object",
+      "properties": {
+        "competitionId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "username": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 24,
+          "pattern": "^[a-zA-Z0-9_]+$"
+        },
+        "avatarId": {
+          "type": "string",
+          "enum": ["amber", "forest", "midnight", "sunset", "slate", "coral", "sage", "stone"]
+        },
+        "totalMinutes": { "type": "integer" },
+        "sessionsCount": { "type": "integer" },
+        "lastSessionId": { "type": "string", "maxLength": 128 },
+        "joinedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "competitionId",
+        "userId",
+        "username",
+        "avatarId",
+        "totalMinutes",
+        "sessionsCount",
+        "lastSessionId",
+        "joinedAt",
+        "updatedAt"
+      ]
+    },
+    "CompetitionInvite": {
+      "title": "CompetitionInvite",
+      "description": "Invite code lookup entry mapping code to private competition ID.",
+      "type": "object",
+      "properties": {
+        "inviteCode": {
+          "type": "string",
+          "minLength": 6,
+          "maxLength": 16,
+          "pattern": "^[A-Z0-9]+$"
+        },
+        "competitionId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": { "type": "string", "minLength": 3, "maxLength": 60 },
+        "creatorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "startDayKey": { "type": "string", "maxLength": 16 },
+        "endDayKey": { "type": "string", "maxLength": 16 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "inviteCode",
+        "competitionId",
+        "title",
+        "creatorId",
+        "startDayKey",
+        "endDayKey",
+        "createdAt"
+      ]
+    },
+    "UserCompetition": {
+      "title": "UserCompetition",
+      "description": "User's joined private competition reference for fast listing.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "competitionId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": { "type": "string", "minLength": 3, "maxLength": 60 },
+        "inviteCode": {
+          "type": "string",
+          "minLength": 6,
+          "maxLength": 16,
+          "pattern": "^[A-Z0-9]+$"
+        },
+        "joinedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "competitionId", "title", "inviteCode", "joinedAt"]
+    },
+    "FocusRoom": {
+      "title": "FocusRoom",
+      "description": "Future-ready shared focus room metadata.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": { "type": "string", "minLength": 3, "maxLength": 60 },
+        "hostId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "visibility": { "type": "string", "enum": ["public", "invite"] },
+        "sessionMinutes": { "type": "integer" },
+        "status": { "type": "string", "enum": ["waiting", "focusing", "break"] },
+        "activeCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "name",
+        "hostId",
+        "visibility",
+        "sessionMinutes",
+        "status",
+        "activeCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users_private/{userId}": {
+      "schema": { "$ref": "#/entities/UserPrivate" },
+      "description": "Owner-only PII record containing email and account timestamps."
+    },
+    "/user_profiles/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User gamification profile, streaks, XP, privacy setting, and unlocked achievements."
+    },
+    "/usernames/{usernameLower}": {
+      "schema": { "$ref": "#/entities/UsernameClaim" },
+      "description": "Unique username lookup index."
+    },
+    "/leaderboard_entries/{userId}": {
+      "schema": { "$ref": "#/entities/LeaderboardEntry" },
+      "description": "Leaderboard projection filtered by privacy rules."
+    },
+    "/focus_sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/FocusSession" },
+      "description": "Immutable verified focus session records."
+    },
+    "/user_achievements/{docId}": {
+      "schema": { "$ref": "#/entities/UserAchievement" },
+      "description": "Single-grant user achievement records."
+    },
+    "/user_challenges/{docId}": {
+      "schema": { "$ref": "#/entities/UserChallenge" },
+      "description": "Single-grant daily challenge completion records."
+    },
+    "/friendships/{friendshipId}": {
+      "schema": { "$ref": "#/entities/Friendship" },
+      "description": "Friend requests and accepted friendships."
+    },
+    "/competitions/{competitionId}": {
+      "schema": { "$ref": "#/entities/Competition" },
+      "description": "Private focus competitions."
+    },
+    "/competitions/{competitionId}/members/{memberId}": {
+      "schema": { "$ref": "#/entities/CompetitionMember" },
+      "description": "Participants and focus minutes inside a private competition."
+    },
+    "/competition_invites/{inviteCode}": {
+      "schema": { "$ref": "#/entities/CompetitionInvite" },
+      "description": "Invite code lookup index for joining private competitions."
+    },
+    "/user_competitions/{docId}": {
+      "schema": { "$ref": "#/entities/UserCompetition" },
+      "description": "User joined competition references."
+    },
+    "/focus_rooms/{roomId}": {
+      "schema": { "$ref": "#/entities/FocusRoom" },
+      "description": "Future-ready focus room metadata."
+    }
+  }
+}

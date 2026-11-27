@@ -1,8 +1,22 @@
 import { Link } from "@tanstack/react-router";
-import { Settings as Gear, Timer, BarChart3, ChevronLeft, Maximize2 } from "lucide-react";
+import {
+  Settings as Gear,
+  Timer,
+  BarChart3,
+  Trophy,
+  Users,
+  ChevronLeft,
+  Maximize2,
+  Cloud,
+  CloudOff,
+  RefreshCw,
+  AlertCircle,
+  CheckCircle2,
+} from "lucide-react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { PWAInstallHeaderButton } from "@/components/PWAControls";
+import { AVATAR_OPTIONS, type AvatarId, type SyncStatus } from "@/lib/gamification";
 
 export function Logo() {
   return (
@@ -103,16 +117,19 @@ export function Card({ className, children }: { className?: string; children: Re
 
 export function BottomNav() {
   const item =
-    "press flex flex-1 flex-col items-center gap-1 rounded-full py-2 text-xs font-medium text-muted-foreground";
+    "press flex flex-1 flex-col items-center gap-1 rounded-full py-2 text-[11px] font-medium text-muted-foreground transition-colors";
   return (
-    <nav className="sticky bottom-4 mx-auto mt-6 flex w-56 gap-1 rounded-full border border-border bg-card p-1.5">
+    <nav
+      aria-label="Primary navigation"
+      className="sticky bottom-4 z-20 mx-auto mt-6 flex w-full max-w-sm gap-1 rounded-full border border-border bg-card/95 p-1.5 shadow-sm backdrop-blur-md"
+    >
       <Link
         to="/"
         className={item}
         activeProps={{ className: "bg-secondary !text-foreground" }}
         activeOptions={{ exact: true }}
       >
-        <Timer className="size-5" strokeWidth={1.75} />
+        <Timer className="size-[18px]" strokeWidth={1.75} />
         Focus
       </Link>
       <Link
@@ -120,8 +137,24 @@ export function BottomNav() {
         className={item}
         activeProps={{ className: "bg-secondary !text-foreground" }}
       >
-        <BarChart3 className="size-5" strokeWidth={1.75} />
+        <BarChart3 className="size-[18px]" strokeWidth={1.75} />
         Progress
+      </Link>
+      <Link
+        to="/leaderboard"
+        className={item}
+        activeProps={{ className: "bg-secondary !text-foreground" }}
+      >
+        <Trophy className="size-[18px]" strokeWidth={1.75} />
+        Ranks
+      </Link>
+      <Link
+        to="/social"
+        className={item}
+        activeProps={{ className: "bg-secondary !text-foreground" }}
+      >
+        <Users className="size-[18px]" strokeWidth={1.75} />
+        Social
       </Link>
     </nav>
   );
@@ -144,11 +177,88 @@ export function Sheet({
     >
       <div
         role="dialog"
-        className="screen-in w-full max-w-md rounded-t-[28px] bg-card p-6 pb-8 sm:rounded-[28px]"
+        className="screen-in max-h-[88dvh] w-full max-w-md overflow-y-auto rounded-t-[28px] bg-card p-6 pb-8 sm:rounded-[28px]"
         onClick={(e) => e.stopPropagation()}
       >
         {children}
       </div>
     </div>
+  );
+}
+
+export function AvatarBadge({
+  username,
+  avatarId,
+  size = "md",
+}: {
+  username: string;
+  avatarId: AvatarId;
+  size?: "sm" | "md" | "lg";
+}) {
+  const palette = AVATAR_OPTIONS.find((a) => a.id === avatarId) ?? AVATAR_OPTIONS[0]!;
+  const initial = (username.trim()[0] ?? "F").toUpperCase();
+  const dims =
+    size === "sm" ? "size-8 text-xs" : size === "lg" ? "size-14 text-lg" : "size-10 text-sm";
+
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "inline-flex shrink-0 items-center justify-center rounded-full font-semibold select-none",
+        dims,
+      )}
+      style={{ backgroundColor: palette.bg, color: palette.fg }}
+    >
+      {initial}
+    </span>
+  );
+}
+
+export function SyncStatusChip({
+  status,
+  pendingCount,
+}: {
+  status: SyncStatus;
+  pendingCount: number;
+}) {
+  const config: Record<SyncStatus, { label: string; icon: ReactNode; tone: string }> = {
+    offline: {
+      label: pendingCount > 0 ? `Offline · ${pendingCount} queued` : "Offline",
+      icon: <CloudOff className="size-3.5 text-primary" strokeWidth={2} />,
+      tone: "border-primary/30 bg-primary-soft text-foreground",
+    },
+    waiting: {
+      label: `Waiting to sync (${pendingCount})`,
+      icon: <Cloud className="size-3.5 text-primary" strokeWidth={2} />,
+      tone: "border-border bg-secondary text-foreground",
+    },
+    syncing: {
+      label: "Synchronizing…",
+      icon: <RefreshCw className="size-3.5 animate-spin text-primary" strokeWidth={2} />,
+      tone: "border-primary/30 bg-primary-soft text-foreground",
+    },
+    synced: {
+      label: "Sync completed",
+      icon: <CheckCircle2 className="size-3.5 text-primary" strokeWidth={2} />,
+      tone: "border-border bg-card text-muted-foreground",
+    },
+    failed: {
+      label: "Synchronization failed",
+      icon: <AlertCircle className="size-3.5 text-coral" strokeWidth={2} />,
+      tone: "border-coral/30 bg-coral/10 text-foreground",
+    },
+  };
+
+  const c = config[status];
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
+        c.tone,
+      )}
+    >
+      {c.icon}
+      <span>{c.label}</span>
+    </span>
   );
 }

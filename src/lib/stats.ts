@@ -1,4 +1,12 @@
-export type Session = { endedAt: number; minutes: number; label?: string };
+export type Session = {
+  id?: string;
+  startedAt?: number;
+  endedAt: number;
+  minutes: number;
+  label?: string;
+  synced?: boolean;
+  syncedAt?: number;
+};
 
 export function dayKey(t: number): string {
   const d = new Date(t);

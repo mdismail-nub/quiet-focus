@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { Download, Share, WifiOff } from "lucide-react";
+import { CheckCircle2, CloudOff, Download, RefreshCw, Share, WifiOff, X } from "lucide-react";
 import { useOnlineStatus, usePWAInstall } from "@/lib/use-pwa";
+import { useFocus } from "@/lib/focus-store";
 import { PillButton, Sheet } from "@/components/ui-kit";
+import { formatMinutes } from "@/lib/stats";
 
 export function PWAInstallHeaderButton() {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
@@ -114,4 +116,100 @@ export function OfflineIndicator() {
       <span>Offline mode</span>
     </div>
   );
+}
+
+export function SyncStatusBanner() {
+  const f = useFocus();
+  const browserOnline = useOnlineStatus();
+  const isOffline = !browserOnline || !f.serverOnline || f.syncStatus === "offline";
+
+  if (!f.ready) return null;
+
+  if (f.syncNotice) {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        className="mx-auto mt-3 flex max-w-xl items-start justify-between gap-3 rounded-2xl border border-primary/30 bg-primary-soft px-4 py-3 text-xs text-foreground"
+      >
+        <div className="flex items-start gap-2.5">
+          <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-primary" strokeWidth={2} />
+          <p className="leading-relaxed font-medium">{f.syncNotice}</p>
+        </div>
+        <button
+          type="button"
+          onClick={f.dismissSyncNotice}
+          aria-label="Dismiss sync notice"
+          className="press rounded-full p-1 text-muted-foreground hover:text-foreground"
+        >
+          <X className="size-3.5" />
+        </button>
+      </div>
+    );
+  }
+
+  if (isOffline) {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        className="mx-auto mt-3 rounded-2xl border border-border bg-card px-4 py-3 text-xs text-foreground shadow-xs"
+      >
+        <div className="flex items-start gap-2.5">
+          <CloudOff className="mt-0.5 size-4 shrink-0 text-primary" strokeWidth={2} />
+          <div className="min-w-0 flex-1">
+            <p className="leading-relaxed text-foreground">
+              You&apos;re currently offline. Your focus sessions are being saved locally. Your
+              leaderboard will be updated automatically when you&apos;re back online.
+            </p>
+            {f.pendingCount > 0 && (
+              <p className="mt-1.5 font-medium text-muted-foreground tabular-nums">
+                Pending queue: {f.pendingCount} {f.pendingCount === 1 ? "session" : "sessions"} (
+                {formatMinutes(f.pendingMinutes)})
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (f.pendingCount > 0 && (f.syncStatus === "waiting" || f.syncStatus === "failed")) {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        className="mx-auto mt-3 flex items-center justify-between gap-3 rounded-2xl border border-border bg-card px-4 py-2.5 text-xs text-foreground"
+      >
+        <div className="min-w-0">
+          <p className="font-medium">
+            {f.syncStatus === "failed" ? "Synchronization failed" : "Waiting to sync"} ·{" "}
+            <span className="tabular-nums">
+              {f.pendingCount} {f.pendingCount === 1 ? "session" : "sessions"} (
+              {formatMinutes(f.pendingMinutes)})
+            </span>
+          </p>
+          {f.lastSyncError ? (
+            <p className="mt-0.5 truncate text-muted-foreground">{f.lastSyncError}</p>
+          ) : !f.user ? (
+            <p className="mt-0.5 text-muted-foreground">
+              Sign in on the Social tab to upload queued sessions.
+            </p>
+          ) : null}
+        </div>
+        {f.user && (
+          <button
+            type="button"
+            onClick={() => void f.triggerSync()}
+            className="press flex shrink-0 items-center gap-1 rounded-full bg-secondary px-3 py-1.5 font-medium text-foreground"
+          >
+            <RefreshCw className="size-3" />
+            Retry
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return null;
 }
