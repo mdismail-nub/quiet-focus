@@ -2,6 +2,7 @@ node_modules
 dist
 dev-dist
 .output
+.vercel
 .vinxi
 pnpm-lock.yaml
 package-lock.json

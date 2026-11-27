@@ -10,9 +10,13 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 import { VitePWA } from "vite-plugin-pwa";
 
+const isVercel = Boolean(process.env["VERCEL"]) || process.env["NITRO_PRESET"] === "vercel";
+const nitroPreset = process.env["NITRO_PRESET"] || (isVercel ? "vercel" : "node-server");
+const pwaOutDir = isVercel ? ".vercel/output/static" : ".output/public";
+
 export default defineConfig({
   nitro: {
-    preset: "node-server",
+    preset: nitroPreset,
   },
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
@@ -22,7 +26,7 @@ export default defineConfig({
   plugins: [
     VitePWA({
       registerType: "autoUpdate",
-      outDir: ".output/public",
+      outDir: pwaOutDir,
       includeAssets: [
         "favicon.svg",
         "apple-touch-icon.png",
@@ -62,7 +66,7 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globDirectory: ".output/public",
+        globDirectory: pwaOutDir,
         navigateFallback: null,
         cleanupOutdatedCaches: true,
         globPatterns: ["**/*.{js,css,ico,png,svg,woff,woff2,webmanifest}"],
