@@ -10,78 +10,116 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 import { VitePWA } from "vite-plugin-pwa";
 
+const isCapacitor = process.env["CAPACITOR"] === "1";
 const isVercel = Boolean(process.env["VERCEL"]) || process.env["NITRO_PRESET"] === "vercel";
 const nitroPreset = process.env["NITRO_PRESET"] || (isVercel ? "vercel" : "node-server");
 const pwaOutDir = isVercel ? ".vercel/output/static" : ".output/public";
 
 export default defineConfig({
-  nitro: {
-    preset: nitroPreset,
-  },
+  nitro: isCapacitor
+    ? false
+    : {
+        preset: nitroPreset,
+      },
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
     server: { entry: "server" },
+    ...(isCapacitor
+      ? {
+          spa: {
+            enabled: true,
+            prerender: {
+              enabled: true,
+              outputPath: "/index.html",
+            },
+          },
+        }
+      : {}),
+    router: {
+      codeSplittingOptions: {
+        defaultBehavior: [],
+      },
+    },
   },
   plugins: [
-    VitePWA({
-      strategies: "injectManifest",
-      srcDir: "src",
-      filename: "sw.ts",
-      registerType: "autoUpdate",
-      outDir: pwaOutDir,
-      includeAssets: [
-        "favicon.svg",
-        "apple-touch-icon.png",
-        "pwa-192x192.png",
-        "pwa-512x512.png",
-        "pwa-maskable-512x512.png",
-        "mascots/focus.jpg",
-        "mascots/motivation.jpg",
-        "mascots/complete.jpg",
-        "mascots/break.jpg",
-      ],
-      manifest: {
-        id: "/",
-        name: "Focus — Quiet Focus Timer",
-        short_name: "Focus",
-        description: "A minimal focus timer with landscape immersive mode and offline support.",
-        theme_color: "#f5f5f5",
-        background_color: "#f5f5f5",
-        display: "standalone",
-        start_url: "/",
-        scope: "/",
-        icons: [
+    ...(isCapacitor
+      ? [
           {
-            src: "/pwa-192x192.png",
-            sizes: "192x192",
-            type: "image/png",
-            purpose: "any",
+            name: "capacitor-noop-pwa-register",
+            resolveId(id: string) {
+              if (id === "virtual:pwa-register") return "\0virtual:pwa-register";
+              return undefined;
+            },
+            load(id: string) {
+              if (id === "\0virtual:pwa-register") {
+                return "export function registerSW() { return () => {}; }";
+              }
+              return undefined;
+            },
           },
-          {
-            src: "/pwa-512x512.png",
-            sizes: "512x512",
-            type: "image/png",
-            purpose: "any",
-          },
-          {
-            src: "/pwa-maskable-512x512.png",
-            sizes: "512x512",
-            type: "image/png",
-            purpose: "maskable",
-          },
-        ],
-      },
-      injectManifest: {
-        globDirectory: pwaOutDir,
-        maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
-        globPatterns: ["**/*.{js,css,ico,png,jpg,svg,woff,woff2,webmanifest}"],
-      },
-      devOptions: {
-        enabled: true,
-        type: "module",
-      },
-    }),
+        ]
+      : [
+          VitePWA({
+            strategies: "injectManifest",
+            srcDir: "src",
+            filename: "sw.ts",
+            registerType: "autoUpdate",
+            outDir: pwaOutDir,
+            includeAssets: [
+              "favicon.svg",
+              "apple-touch-icon.png",
+              "pwa-192x192.png",
+              "pwa-512x512.png",
+              "pwa-maskable-512x512.png",
+              "mascots/focus.jpg",
+              "mascots/motivation.jpg",
+              "mascots/complete.jpg",
+              "mascots/break.jpg",
+            ],
+            manifest: {
+              id: "/",
+              name: "Focus — Quiet Focus Timer",
+              short_name: "Focus",
+              description:
+                "A minimal focus timer with landscape immersive mode and offline support.",
+              theme_color: "#f5f5f5",
+              background_color: "#f5f5f5",
+              display: "standalone",
+              start_url: "/",
+              scope: "/",
+              icons: [
+                {
+                  src: "/pwa-192x192.png",
+                  sizes: "192x192",
+                  type: "image/png",
+                  purpose: "any",
+                },
+                {
+                  src: "/pwa-512x512.png",
+                  sizes: "512x512",
+                  type: "image/png",
+                  purpose: "any",
+                },
+                {
+                  src: "/pwa-maskable-512x512.png",
+                  sizes: "512x512",
+                  type: "image/png",
+                  purpose: "maskable",
+                },
+              ],
+            },
+            injectManifest: {
+              globDirectory: pwaOutDir,
+              maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
+              globPatterns: ["**/*.{js,css,ico,png,jpg,svg,woff,woff2,webmanifest}"],
+            },
+            devOptions: {
+              enabled: true,
+              type: "module",
+            },
+          }),
+        ]),
   ],
   vite: {
     server: {

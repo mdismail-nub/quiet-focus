@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Crown, Flame, Lock, RefreshCw, Trophy, Users } from "lucide-react";
 import type { DocumentSnapshot } from "firebase/firestore";
 import { useFocus } from "@/lib/focus-store";
+import { formatUserErrorMessage } from "@/lib/firebase";
 import { formatMinutes } from "@/lib/stats";
 import {
   AvatarBadge,
@@ -96,7 +97,7 @@ function LeaderboardScreen() {
         setRows(cached);
         setShowingCached(true);
       }
-      setErrorMsg(err instanceof Error ? err.message : "Could not load leaderboard.");
+      setErrorMsg(formatUserErrorMessage(err, "Could not load leaderboard."));
     } finally {
       setLoading(false);
     }
@@ -121,8 +122,8 @@ function LeaderboardScreen() {
       });
       setCursorDoc(res.lastDoc);
       setHasMore(res.hasMore && rows.length + res.rows.length < 100);
-    } catch {
-      // Best-effort pagination
+    } catch (err) {
+      setErrorMsg(formatUserErrorMessage(err, "Could not load more leaderboard entries."));
     } finally {
       setLoadingMore(false);
     }
@@ -157,11 +158,12 @@ function LeaderboardScreen() {
           {f.user && f.serverOnline && (
             <button
               type="button"
+              disabled={loading}
               onClick={() => void loadBoard()}
               aria-label="Refresh leaderboard"
-              className="press flex size-8 items-center justify-center rounded-full border border-border bg-card text-muted-foreground hover:text-foreground"
+              className="press flex size-11 items-center justify-center rounded-full border border-border bg-card text-muted-foreground hover:text-foreground disabled:opacity-45"
             >
-              <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
+              <RefreshCw className={cn("size-4", loading && "animate-spin")} />
             </button>
           )}
         </div>
@@ -363,6 +365,13 @@ function LeaderboardScreen() {
             {loadingMore ? "Loading..." : "Load more"}
           </PillButton>
         </div>
+      )}
+
+      {/* Loading state */}
+      {loading && rows.length === 0 && (
+        <Card className="mt-4 text-center">
+          <p className="text-xs text-muted-foreground">Loading rankings...</p>
+        </Card>
       )}
 
       {/* Empty state */}

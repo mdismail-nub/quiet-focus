@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { isCapacitorNative } from "./capacitor-native";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -11,6 +12,12 @@ export function usePWAInstall() {
   const [isIOS, setIsIOS] = useState(false);
 
   useEffect(() => {
+    if (isCapacitorNative()) {
+      setIsInstalled(true);
+      setIsIOS(false);
+      return;
+    }
+
     const isStandalone =
       window.matchMedia("(display-mode: standalone)").matches ||
       (window.navigator as unknown as { standalone?: boolean }).standalone === true;
@@ -68,7 +75,7 @@ export function useOnlineStatus() {
   const [isOnline, setIsOnline] = useState(true);
 
   useEffect(() => {
-    setIsOnline(navigator.onLine);
+    setIsOnline(navigator.onLine !== false);
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
 

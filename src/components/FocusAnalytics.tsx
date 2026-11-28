@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis } from "recharts";
 import { Card } from "@/components/ui-kit";
 import { formatMinutes } from "@/lib/stats";
@@ -14,6 +14,10 @@ const TIMEFRAMES: { id: AnalyticsTimeframe; label: string }[] = [
 
 export function FocusAnalytics({ analytics }: { analytics: AnalyticsSummary }) {
   const [timeframe, setTimeframe] = useState<AnalyticsTimeframe>("daily");
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   const points = analytics.series[timeframe];
   const chartTotal = points.reduce((sum, p) => sum + p.minutes, 0);
 
@@ -70,47 +74,49 @@ export function FocusAnalytics({ analytics }: { analytics: AnalyticsSummary }) {
           </p>
         </div>
 
-        <div className="mt-4 h-44 w-full" data-testid="analytics-chart">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={points} margin={{ top: 6, right: 2, left: 2, bottom: 0 }}>
-              <XAxis
-                dataKey="label"
-                axisLine={false}
-                tickLine={false}
-                tick={{ fill: "var(--color-muted-foreground)", fontSize: 11 }}
-                interval={timeframe === "monthly" ? 1 : 0}
-              />
-              <Tooltip
-                cursor={{ fill: "var(--color-secondary)", opacity: 0.5 }}
-                content={({ active, payload }) => {
-                  if (!active || !payload?.length) return null;
-                  const p = payload[0]?.payload as {
-                    label: string;
-                    minutes: number;
-                    sessions: number;
-                  };
-                  return (
-                    <div className="rounded-xl border border-border bg-card px-3 py-2 text-xs shadow-sm">
-                      <p className="font-semibold text-foreground">{p.label}</p>
-                      <p className="mt-0.5 text-muted-foreground tabular-nums">
-                        {formatMinutes(p.minutes)} · {p.sessions}{" "}
-                        {p.sessions === 1 ? "session" : "sessions"}
-                      </p>
-                    </div>
-                  );
-                }}
-              />
-              <Bar dataKey="minutes" radius={[6, 6, 6, 6]} maxBarSize={26}>
-                {points.map((entry, idx) => (
-                  <Cell
-                    key={idx}
-                    fill={entry.isCurrent ? "var(--color-primary)" : "var(--color-coral)"}
-                    fillOpacity={entry.isCurrent ? 1 : 0.72}
-                  />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+        <div className="mt-4 h-44 w-full min-w-0" data-testid="analytics-chart">
+          {mounted && (
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={176}>
+              <BarChart data={points} margin={{ top: 6, right: 2, left: 2, bottom: 0 }}>
+                <XAxis
+                  dataKey="label"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fill: "var(--color-muted-foreground)", fontSize: 11 }}
+                  interval={timeframe === "monthly" ? 1 : 0}
+                />
+                <Tooltip
+                  cursor={{ fill: "var(--color-secondary)", opacity: 0.5 }}
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const p = payload[0]?.payload as {
+                      label: string;
+                      minutes: number;
+                      sessions: number;
+                    };
+                    return (
+                      <div className="rounded-xl border border-border bg-card px-3 py-2 text-xs shadow-sm">
+                        <p className="font-semibold text-foreground">{p.label}</p>
+                        <p className="mt-0.5 text-muted-foreground tabular-nums">
+                          {formatMinutes(p.minutes)} · {p.sessions}{" "}
+                          {p.sessions === 1 ? "session" : "sessions"}
+                        </p>
+                      </div>
+                    );
+                  }}
+                />
+                <Bar dataKey="minutes" radius={[6, 6, 6, 6]} maxBarSize={26}>
+                  {points.map((entry, idx) => (
+                    <Cell
+                      key={idx}
+                      fill={entry.isCurrent ? "var(--color-primary)" : "var(--color-coral)"}
+                      fillOpacity={entry.isCurrent ? 1 : 0.72}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </Card>
 

@@ -13,22 +13,22 @@ import {
   AlertCircle,
   CheckCircle2,
 } from "lucide-react";
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { useEffect, useRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { PWAInstallHeaderButton } from "@/components/PWAControls";
 import { AVATAR_OPTIONS, type AvatarId, type SyncStatus } from "@/lib/gamification";
 
-export function Logo() {
+export function Logo({ contrastOverBg }: { contrastOverBg?: boolean | undefined }) {
   return (
-    <span className="flex items-center gap-2">
+    <span className={cn("flex items-center gap-2", contrastOverBg && "text-white drop-shadow-xs")}>
       <svg viewBox="0 0 24 24" className="size-6" aria-hidden>
         <circle
           cx="12"
           cy="12"
           r="10"
           fill="none"
-          stroke="var(--color-muted-foreground)"
-          strokeOpacity=".3"
+          stroke={contrastOverBg ? "rgba(255,255,255,0.45)" : "var(--color-muted-foreground)"}
+          strokeOpacity={contrastOverBg ? 1 : 0.3}
           strokeWidth="2.5"
         />
         <path
@@ -44,19 +44,30 @@ export function Logo() {
   );
 }
 
-export function Header({ back, onImmersive }: { back?: boolean; onImmersive?: () => void }) {
+export function Header({
+  back,
+  onImmersive,
+  contrastOverBg,
+}: {
+  back?: boolean;
+  onImmersive?: () => void;
+  contrastOverBg?: boolean;
+}) {
   return (
     <header className="flex items-center justify-between py-4">
       {back ? (
         <Link
           to="/"
-          className="press -ml-2 flex min-h-11 items-center gap-1 rounded-full px-2 text-sm text-muted-foreground"
+          className={cn(
+            "press -ml-2 flex min-h-11 items-center gap-1 rounded-full px-2 text-sm",
+            contrastOverBg ? "text-white/80 hover:text-white" : "text-muted-foreground",
+          )}
         >
           <ChevronLeft className="size-5" />
           Back
         </Link>
       ) : (
-        <Logo />
+        <Logo contrastOverBg={contrastOverBg} />
       )}
       {!back && (
         <div className="-mr-2 flex items-center gap-1">
@@ -67,7 +78,12 @@ export function Header({ back, onImmersive }: { back?: boolean; onImmersive?: ()
               onClick={onImmersive}
               aria-label="Enter landscape focus mode"
               title="Immersive landscape mode"
-              className="press flex min-h-11 min-w-11 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+              className={cn(
+                "press flex min-h-11 min-w-11 items-center justify-center rounded-full transition-colors",
+                contrastOverBg
+                  ? "text-white/80 hover:bg-white/10 hover:text-white"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
             >
               <Maximize2 className="size-[18px]" strokeWidth={1.75} />
             </button>
@@ -75,7 +91,12 @@ export function Header({ back, onImmersive }: { back?: boolean; onImmersive?: ()
           <Link
             to="/settings"
             aria-label="Settings"
-            className="press flex min-h-11 min-w-11 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+            className={cn(
+              "press flex min-h-11 min-w-11 items-center justify-center rounded-full transition-colors",
+              contrastOverBg
+                ? "text-white/80 hover:bg-white/10 hover:text-white"
+                : "text-muted-foreground hover:text-foreground",
+            )}
           >
             <Gear className="size-5" strokeWidth={1.75} />
           </Link>
@@ -163,21 +184,47 @@ export function BottomNav() {
 export function Sheet({
   open,
   onClose,
+  ariaLabel,
   children,
 }: {
   open: boolean;
   onClose: () => void;
+  ariaLabel?: string;
   children: ReactNode;
 }) {
+  const pointerDownOnBackdropRef = useRef(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-ink/30 sm:items-center"
-      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-end justify-center bg-ink/35 backdrop-blur-[2px] sm:items-center"
+      onPointerDown={(e) => {
+        pointerDownOnBackdropRef.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        if (pointerDownOnBackdropRef.current && e.target === e.currentTarget) {
+          onClose();
+        }
+        pointerDownOnBackdropRef.current = false;
+      }}
     >
       <div
         role="dialog"
-        className="screen-in max-h-[88dvh] w-full max-w-md overflow-y-auto rounded-t-[28px] bg-card p-6 pb-8 sm:rounded-[28px]"
+        aria-modal="true"
+        aria-label={ariaLabel}
+        className="screen-in max-h-[88dvh] w-full max-w-md overflow-y-auto rounded-t-[28px] bg-card p-6 pb-8 text-foreground shadow-xl sm:rounded-[28px]"
         onClick={(e) => e.stopPropagation()}
       >
         {children}

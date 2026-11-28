@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Bell, Check, ChevronLeft, Clock, Sparkles, WifiOff } from "lucide-react";
 import { useFocus } from "@/lib/focus-store";
 import { SUGGESTED_REMINDER_TIMES, formatHHMM12Hour } from "@/lib/notifications-core";
@@ -25,9 +25,10 @@ export function NotificationOnboarding({ open, onClose }: { open: boolean; onClo
   );
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const wasOpenRef = useRef(false);
 
   useEffect(() => {
-    if (open) {
+    if (open && !wasOpenRef.current) {
       setStep(1);
       setDailyCount(f.notificationPrefs.dailyCount);
       setSessionCompletion(f.notificationPrefs.sessionCompletion);
@@ -38,6 +39,7 @@ export function NotificationOnboarding({ open, onClose }: { open: boolean; onClo
       setFeedback(null);
       setSubmitting(false);
     }
+    wasOpenRef.current = open;
   }, [
     open,
     f.notificationPrefs.dailyCount,
@@ -56,43 +58,52 @@ export function NotificationOnboarding({ open, onClose }: { open: boolean; onClo
   const handleEnable = async () => {
     setSubmitting(true);
     setFeedback(null);
-    const res = await f.enableCompanionNotifications({
-      dailyCount,
-      sessionCompletion,
-      breakReminders,
-      dailyMotivation: true,
-      morningTime,
-      afternoonTime,
-      eveningTime,
-      customTimes: [],
-      onboardingCompleted: true,
-      onboardingDismissed: false,
-    });
-    setSubmitting(false);
+    try {
+      const res = await f.enableCompanionNotifications({
+        dailyCount,
+        sessionCompletion,
+        breakReminders,
+        dailyMotivation: true,
+        morningTime,
+        afternoonTime,
+        eveningTime,
+        customTimes: [],
+        onboardingCompleted: true,
+        onboardingDismissed: false,
+      });
 
-    if (res.ok) {
-      onClose();
-      return;
+      if (res.ok) {
+        onClose();
+        return;
+      }
+
+      if (res.permission === "denied") {
+        setFeedback(
+          "Notifications are blocked by your browser. You can allow them anytime in browser site settings.",
+        );
+        return;
+      }
+
+      if (res.permission === "unsupported") {
+        setFeedback("System notifications are not supported in this browser environment.");
+        return;
+      }
+
+      setFeedback(res.error ?? "Permission was dismissed. You can enable notifications anytime.");
+    } catch {
+      setFeedback("Could not enable notifications right now. Please try again.");
+    } finally {
+      setSubmitting(false);
     }
-
-    if (res.permission === "denied") {
-      setFeedback(
-        "Notifications are blocked by your browser. You can allow them anytime in browser site settings.",
-      );
-      return;
-    }
-
-    if (res.permission === "unsupported") {
-      setFeedback("System notifications are not supported in this browser environment.");
-      return;
-    }
-
-    setFeedback(res.error ?? "Permission was dismissed. You can enable notifications anytime.");
   };
 
   const permissionDenied = f.notificationPermission === "denied";
   const unsupported = !f.notificationSupport.notificationApi;
-  const offlineNow = !f.serverOnline || (typeof navigator !== "undefined" && !navigator.onLine);
+  const offlineNow =
+    !f.serverOnline ||
+    (typeof window !== "undefined" &&
+      typeof navigator !== "undefined" &&
+      navigator.onLine === false);
 
   return (
     <Sheet open={open} onClose={handleSkip}>

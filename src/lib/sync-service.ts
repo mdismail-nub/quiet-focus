@@ -8,7 +8,7 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
-import { auth, db, handleFirestoreError, OperationType } from "./firebase";
+import { auth, db, formatUserErrorMessage, handleFirestoreError, OperationType } from "./firebase";
 import {
   calculateSessionBaseXp,
   computeLevelInfo,
@@ -24,6 +24,7 @@ import {
   type SyncStatus,
 } from "./gamification";
 import type { Session } from "./stats";
+import { getApiBaseUrl, isCapacitorNative, resolveApiUrl } from "./capacitor-native";
 
 const SYNC_QUEUE_KEY = "focus.syncQueue";
 
@@ -87,12 +88,17 @@ export function computeBackoffDelayMs(attempts: number): number {
 
 export async function checkServerConnectivity(timeoutMs = 3500): Promise<boolean> {
   if (typeof window === "undefined") return false;
-  if (typeof navigator !== "undefined" && !navigator.onLine) return false;
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
+
+  // Inside a Capacitor APK without an external VITE_API_BASE_URL, there is no local /api/health server.
+  if (isCapacitorNative() && !getApiBaseUrl()) {
+    return true;
+  }
 
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(`/api/health?t=${Date.now()}`, {
+    const res = await fetch(resolveApiUrl(`/api/health?t=${Date.now()}`), {
       method: "GET",
       cache: "no-store",
       signal: controller.signal,
@@ -236,26 +242,11 @@ export async function syncPendingSessions(options: {
       continue;
     }
 
-    try {
-      const validateRes = await fetch("/api/sessions/validate", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({
-          sessionId: item.sessionId,
-          startedAt: item.startedAt,
-          endedAt: item.endedAt,
-          minutes: item.minutes,
-          label: item.label,
-        }),
-      });
-
-      if (validateRes.status === 401) {
-        // Refresh token once on expiry
-        idToken = await currentUser.getIdToken(true);
-        const retryRes = await fetch("/api/sessions/validate", {
+    const shouldCallRemoteValidator = !isCapacitorNative() || Boolean(getApiBaseUrl());
+    if (shouldCallRemoteValidator) {
+      const validateUrl = resolveApiUrl("/api/sessions/validate");
+      try {
+        const validateRes = await fetch(validateUrl, {
           method: "POST",
           headers: {
             "content-type": "application/json",
@@ -269,24 +260,43 @@ export async function syncPendingSessions(options: {
             label: item.label,
           }),
         });
-        if (!retryRes.ok) {
-          throw new Error("Authentication expired during synchronization.");
+
+        if (validateRes.status === 401) {
+          // Refresh token once on expiry
+          idToken = await currentUser.getIdToken(true);
+          const retryRes = await fetch(validateUrl, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              authorization: `Bearer ${idToken}`,
+            },
+            body: JSON.stringify({
+              sessionId: item.sessionId,
+              startedAt: item.startedAt,
+              endedAt: item.endedAt,
+              minutes: item.minutes,
+              label: item.label,
+            }),
+          });
+          if (!retryRes.ok) {
+            throw new Error("Authentication expired during synchronization.");
+          }
+        } else if (validateRes.status === 400) {
+          // Permanently invalid session rejected by server validation
+          continue;
+        } else if (!validateRes.ok) {
+          throw new Error(`Server validation temporarily unavailable (${validateRes.status})`);
         }
-      } else if (validateRes.status === 400) {
-        // Permanently invalid session rejected by server validation
+      } catch (err) {
+        const attempts = item.attempts + 1;
+        remaining.push({
+          ...item,
+          attempts,
+          nextRetryAt: Date.now() + computeBackoffDelayMs(attempts),
+          lastError: err instanceof Error ? err.message : "Network error",
+        });
         continue;
-      } else if (!validateRes.ok) {
-        throw new Error(`Server validation temporarily unavailable (${validateRes.status})`);
       }
-    } catch (err) {
-      const attempts = item.attempts + 1;
-      remaining.push({
-        ...item,
-        attempts,
-        nextRetryAt: Date.now() + computeBackoffDelayMs(attempts),
-        lastError: err instanceof Error ? err.message : "Network error",
-      });
-      continue;
     }
 
     // Idempotency check: if session already exists on server, skip re-crediting
@@ -518,7 +528,7 @@ export async function syncPendingSessions(options: {
         ...item,
         attempts,
         nextRetryAt: Date.now() + computeBackoffDelayMs(attempts),
-        lastError: err instanceof Error ? err.message : "Sync write failed",
+        lastError: formatUserErrorMessage(err, "Sync write failed."),
       });
     }
   }

@@ -1,12 +1,14 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { Bell, ChevronRight } from "lucide-react";
+import { Bell, ChevronRight, Volume2, X } from "lucide-react";
 import { useFocus, type Theme } from "@/lib/focus-store";
 import type { Ambient } from "@/lib/ambient";
+import { CHIME_TONES, clampChimeVolume } from "@/lib/sound-notifications";
 import { LANDSCAPE_THEMES } from "@/lib/landscape-themes";
 import { Card, Header, PillButton, Sheet, SyncStatusChip } from "@/components/ui-kit";
 import { PWAInstallSettingsControl } from "@/components/PWAControls";
 import { NotificationOnboarding } from "@/components/NotificationOnboarding";
+import { CustomBackgroundControls } from "@/components/CustomBackgroundControls";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/settings")({
@@ -126,6 +128,7 @@ function SettingsScreen() {
   const [ambientOpen, setAmbientOpen] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [custom, setCustom] = useState(s.customMinutes);
+  const [customDraft, setCustomDraft] = useState(String(s.customMinutes));
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [wakeLockSupported, setWakeLockSupported] = useState(true);
 
@@ -169,7 +172,9 @@ function SettingsScreen() {
             type="button"
             className="press flex min-h-11 items-center gap-1 text-muted-foreground"
             onClick={() => {
-              setCustom(s.customMinutes);
+              const clamped = Math.min(240, Math.max(1, s.customMinutes));
+              setCustom(clamped);
+              setCustomDraft(String(clamped));
               setCustomOpen(true);
             }}
           >
@@ -244,6 +249,17 @@ function SettingsScreen() {
         </div>
       </Card>
 
+      <p className="mt-6 mb-2 px-1 text-xs font-medium text-muted-foreground">
+        Focus timer background
+      </p>
+      <Card>
+        <p className="text-[15px]">Custom background image</p>
+        <p className="mt-0.5 mb-4 text-xs text-muted-foreground">
+          Upload your own image to display behind the timer while focusing. Works offline.
+        </p>
+        <CustomBackgroundControls />
+      </Card>
+
       <p className="mt-6 mb-2 px-1 text-xs font-medium text-muted-foreground">Sound & focus</p>
       <Card className="py-1">
         <Row label="Ambient sound">
@@ -256,13 +272,93 @@ function SettingsScreen() {
             <ChevronRight className="size-4" />
           </button>
         </Row>
-        <Row label="Sound when complete">
+        <Row label="Gentle chimes" hint="Play a subtle chime when focus ends or a break starts">
           <Toggle
-            label="Sound when complete"
+            label="Gentle chimes"
             on={s.sound}
             onChange={(v) => f.setSettings({ sound: v })}
           />
         </Row>
+        {s.sound && (
+          <div className="space-y-4 border-b border-border py-3.5">
+            <div>
+              <p className="text-[13px] font-medium text-muted-foreground">Chime tone</p>
+              <div
+                className="mt-2 grid grid-cols-3 gap-2"
+                role="radiogroup"
+                aria-label="Chime tone"
+              >
+                {CHIME_TONES.map((tone) => {
+                  const selected = s.chimeTone === tone.id;
+                  return (
+                    <button
+                      key={tone.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => {
+                        f.setSettings({ chimeTone: tone.id });
+                        f.previewChime("focus-end", tone.id);
+                      }}
+                      className={cn(
+                        "press flex min-h-11 flex-col items-start justify-center rounded-2xl border px-3 py-2 text-left transition-colors",
+                        selected
+                          ? "border-primary bg-primary-soft text-foreground"
+                          : "border-border bg-secondary/40 text-muted-foreground hover:bg-secondary/70",
+                      )}
+                    >
+                      <span className="text-xs font-semibold text-foreground">{tone.label}</span>
+                      <span className="mt-0.5 text-[11px] leading-tight text-muted-foreground">
+                        {tone.description}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between text-[13px]">
+                <span className="flex items-center gap-1.5 font-medium text-muted-foreground">
+                  <Volume2 className="size-3.5" />
+                  Chime volume
+                </span>
+                <span className="font-semibold tabular-nums text-foreground">
+                  {Math.round(clampChimeVolume(s.chimeVolume) * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                aria-label="Chime volume"
+                min={0.1}
+                max={1}
+                step={0.05}
+                value={clampChimeVolume(s.chimeVolume)}
+                onChange={(e) =>
+                  f.setSettings({ chimeVolume: clampChimeVolume(Number(e.target.value)) })
+                }
+                className="mt-2 h-2 w-full cursor-pointer accent-primary"
+              />
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => f.previewChime("focus-end")}
+                className="press rounded-full bg-secondary px-3.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/80"
+              >
+                Test focus chime
+              </button>
+              <button
+                type="button"
+                onClick={() => f.previewChime("break-start")}
+                className="press rounded-full bg-secondary px-3.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/80"
+              >
+                Test break chime
+              </button>
+            </div>
+          </div>
+        )}
         <Row label="Focus Companion alerts" hint={notificationStatusText}>
           <div className="flex items-center gap-1">
             {!np.enabled && f.notificationPermission === "default" && (
@@ -295,6 +391,7 @@ function SettingsScreen() {
           <Toggle
             label="Keep screen awake"
             on={s.keepAwake}
+            disabled={!wakeLockSupported}
             onChange={(v) => f.setSettings({ keepAwake: v })}
           />
         </Row>
@@ -365,22 +462,57 @@ function SettingsScreen() {
         Reset statistics
       </button>
 
-      <Sheet open={customOpen} onClose={() => setCustomOpen(false)}>
-        <h2 className="text-xl font-semibold">Custom duration</h2>
+      <Sheet open={customOpen} onClose={() => setCustomOpen(false)} ariaLabel="Custom duration">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-xl font-semibold">Custom duration</h2>
+          <button
+            type="button"
+            onClick={() => setCustomOpen(false)}
+            aria-label="Close custom duration"
+            className="press flex min-h-10 min-w-10 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
         <label className="my-6 flex items-baseline justify-center gap-2">
           <input
             aria-label="Custom minutes"
             type="number"
             inputMode="numeric"
-            value={custom}
-            onChange={(e) => setCustom(Math.min(240, Math.max(1, Number(e.target.value) || 1)))}
+            min={1}
+            max={240}
+            value={customDraft}
+            onChange={(e) => {
+              const val = e.target.value;
+              setCustomDraft(val);
+              if (val.trim() !== "") {
+                const parsed = Number(val);
+                if (Number.isFinite(parsed) && parsed >= 1) {
+                  setCustom(Math.min(240, Math.max(1, Math.round(parsed))));
+                }
+              }
+            }}
+            onBlur={() => {
+              const parsed = Number(customDraft);
+              const next =
+                Number.isFinite(parsed) && customDraft.trim() !== ""
+                  ? Math.min(240, Math.max(1, Math.round(parsed)))
+                  : custom;
+              setCustom(next);
+              setCustomDraft(String(next));
+            }}
             className="w-28 bg-transparent text-center text-5xl font-bold tabular-nums outline-hidden"
           />
           <span className="text-muted-foreground">min</span>
         </label>
         <PillButton
           onClick={() => {
-            f.setSettings({ customMinutes: custom });
+            const parsed = Number(customDraft);
+            const finalMin =
+              Number.isFinite(parsed) && customDraft.trim() !== ""
+                ? Math.min(240, Math.max(1, Math.round(parsed)))
+                : custom;
+            f.setSettings({ customMinutes: finalMin });
             setCustomOpen(false);
           }}
         >
@@ -388,8 +520,18 @@ function SettingsScreen() {
         </PillButton>
       </Sheet>
 
-      <Sheet open={ambientOpen} onClose={() => setAmbientOpen(false)}>
-        <h2 className="text-xl font-semibold">Ambient sound</h2>
+      <Sheet open={ambientOpen} onClose={() => setAmbientOpen(false)} ariaLabel="Ambient sound">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-xl font-semibold">Ambient sound</h2>
+          <button
+            type="button"
+            onClick={() => setAmbientOpen(false)}
+            aria-label="Close ambient sound"
+            className="press flex min-h-10 min-w-10 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
         <p className="mt-1 text-sm text-muted-foreground">
           Plays quietly while a focus session is running.
         </p>

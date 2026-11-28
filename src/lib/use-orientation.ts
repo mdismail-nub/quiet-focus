@@ -1,4 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  getNativeOrientationIsLandscape,
+  isCapacitorNative,
+  lockNativeLandscape,
+  registerNativeOrientationListener,
+  setNativeImmersiveStatusBar,
+  unlockNativeOrientation,
+} from "./capacitor-native";
 import { useFocus } from "./focus-store";
 import { exitFullscreen, isFullscreenActive } from "./fullscreen";
 
@@ -17,15 +25,15 @@ function detectCompactOrTouchLandscape(): boolean {
 }
 
 export function useOrientationImmersive() {
-  const { immersiveManual, setImmersiveManual } = useFocus();
+  const { immersiveManual, setImmersiveManual, settings } = useFocus();
   const [isLandscape, setIsLandscape] = useState(false);
   const [autoLandscape, setAutoLandscape] = useState(false);
   const dismissedRef = useRef(false);
   const prevLandscapeRef = useRef<boolean | null>(null);
+  const lockedManuallyRef = useRef(false);
 
   useEffect(() => {
-    const sync = () => {
-      const nextLandscape = detectLandscape();
+    const applyLandscapeState = (nextLandscape: boolean) => {
       const prevLandscape = prevLandscapeRef.current;
       prevLandscapeRef.current = nextLandscape;
       setIsLandscape(nextLandscape);
@@ -54,6 +62,8 @@ export function useOrientationImmersive() {
       }
     };
 
+    const sync = () => applyLandscapeState(detectLandscape());
+
     sync();
     const mq = window.matchMedia?.("(orientation: landscape)");
     const onChange = () => sync();
@@ -62,16 +72,33 @@ export function useOrientationImmersive() {
     window.addEventListener("resize", onChange);
     window.screen?.orientation?.addEventListener?.("change", onChange);
 
+    let removeNativeListener: (() => void) | undefined;
+    if (isCapacitorNative()) {
+      void getNativeOrientationIsLandscape().then((nativeLand) => {
+        if (nativeLand !== null) applyLandscapeState(nativeLand);
+      });
+      void registerNativeOrientationListener((nativeLand) => {
+        applyLandscapeState(nativeLand);
+      }).then((unsub) => {
+        removeNativeListener = unsub;
+      });
+    }
+
     return () => {
       mq?.removeEventListener?.("change", onChange);
       window.removeEventListener("resize", onChange);
       window.screen?.orientation?.removeEventListener?.("change", onChange);
+      removeNativeListener?.();
     };
   }, [setImmersiveManual]);
 
   const enterImmersive = useCallback(() => {
     dismissedRef.current = false;
     setImmersiveManual(true);
+    if (isCapacitorNative() && !detectLandscape()) {
+      lockedManuallyRef.current = true;
+      void lockNativeLandscape();
+    }
   }, [setImmersiveManual]);
 
   const exitImmersive = useCallback(() => {
@@ -81,9 +108,23 @@ export function useOrientationImmersive() {
     if (isFullscreenActive()) {
       void exitFullscreen();
     }
+    if (isCapacitorNative() && lockedManuallyRef.current) {
+      lockedManuallyRef.current = false;
+      void unlockNativeOrientation();
+    }
   }, [setImmersiveManual]);
 
   const isImmersive = immersiveManual || (isLandscape && autoLandscape && !dismissedRef.current);
+
+  useEffect(() => {
+    if (!isCapacitorNative()) return;
+    const isDark =
+      settings.theme === "dark" ||
+      (settings.theme === "system" &&
+        typeof window !== "undefined" &&
+        window.matchMedia?.("(prefers-color-scheme: dark)")?.matches);
+    void setNativeImmersiveStatusBar(isImmersive, Boolean(isDark));
+  }, [isImmersive, settings.theme]);
 
   return {
     isLandscape,

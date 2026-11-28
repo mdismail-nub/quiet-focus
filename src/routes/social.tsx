@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import {
   Check,
@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { useFocus } from "@/lib/focus-store";
+import { formatUserErrorMessage } from "@/lib/firebase";
 import { formatMinutes } from "@/lib/stats";
 import {
   AVATAR_OPTIONS,
@@ -67,6 +68,7 @@ export const Route = createFileRoute("/social")({
 
 function SocialScreen() {
   const f = useFocus();
+  const navigate = useNavigate();
   const { profile, user, gamification, analytics } = f;
 
   // Profile editor state
@@ -87,6 +89,7 @@ function SocialScreen() {
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [selectedFriend, setSelectedFriend] = useState<LeaderboardRow | null>(null);
   const [socialNotice, setSocialNotice] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
 
   // Private competitions state
   const [competitions, setCompetitions] = useState<CompetitionSummary[]>([]);
@@ -97,12 +100,14 @@ function SocialScreen() {
   const [joinCode, setJoinCode] = useState("");
   const [activeComp, setActiveComp] = useState<CompetitionSummary | null>(null);
   const [activeCompMembers, setActiveCompMembers] = useState<CompetitionMemberRow[]>([]);
+  const [loadingCompMembers, setLoadingCompMembers] = useState(false);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
   // Future-ready Focus Rooms
   const [rooms, setRooms] = useState<FocusRoom[]>([]);
   const [roomName, setRoomName] = useState("");
   const [roomOpen, setRoomOpen] = useState(false);
+  const [selectedRoom, setSelectedRoom] = useState<FocusRoom | null>(null);
 
   const loadSocialData = useCallback(async () => {
     if (!user || !f.serverOnline) return;
@@ -163,7 +168,7 @@ function SocialScreen() {
       });
       setEditOpen(false);
     } catch (err) {
-      setProfileMsg(err instanceof Error ? err.message : "Could not save profile.");
+      setProfileMsg(formatUserErrorMessage(err, "Could not save profile."));
     } finally {
       setProfileSaving(false);
     }
@@ -171,6 +176,10 @@ function SocialScreen() {
 
   const handleSearch = async () => {
     if (!user || searchTerm.trim().length < 2) return;
+    if (!f.serverOnline) {
+      setSocialNotice("You're offline. Connect to the internet to search users.");
+      return;
+    }
     setSearching(true);
     setSocialNotice(null);
     try {
@@ -178,27 +187,75 @@ function SocialScreen() {
       setSearchResults(res);
       if (res.length === 0) setSocialNotice("No matching public users found.");
     } catch (err) {
-      setSocialNotice(err instanceof Error ? err.message : "Search failed.");
+      setSocialNotice(formatUserErrorMessage(err, "Search failed."));
     } finally {
       setSearching(false);
     }
   };
 
   const handleSendRequest = async (targetUid: string) => {
-    if (!user) return;
+    if (!user || busyAction) return;
+    if (!f.serverOnline) {
+      setSocialNotice("You're offline. Connect to the internet to send friend requests.");
+      return;
+    }
     setSocialNotice(null);
+    setBusyAction(`send:${targetUid}`);
     try {
       await sendFriendRequest(user.uid, targetUid);
       setSocialNotice("Friend request sent.");
       await loadSocialData();
     } catch (err) {
-      setSocialNotice(err instanceof Error ? err.message : "Could not send request.");
+      setSocialNotice(formatUserErrorMessage(err, "Could not send friend request."));
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleRespondRequest = async (friendshipId: string, accept: boolean) => {
+    if (busyAction) return;
+    if (!f.serverOnline) {
+      setSocialNotice("You're offline. Connect to the internet to update requests.");
+      return;
+    }
+    setSocialNotice(null);
+    setBusyAction(`respond:${friendshipId}`);
+    try {
+      await respondFriendRequest(friendshipId, accept);
+      await loadSocialData();
+    } catch (err) {
+      setSocialNotice(formatUserErrorMessage(err, "Could not update friend request."));
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleRemoveFriend = async (friendshipId: string) => {
+    if (busyAction) return;
+    if (!f.serverOnline) {
+      setSocialNotice("You're offline. Connect to the internet to remove a friend.");
+      return;
+    }
+    setSocialNotice(null);
+    setBusyAction(`remove:${friendshipId}`);
+    try {
+      await removeFriendship(friendshipId);
+      await loadSocialData();
+    } catch (err) {
+      setSocialNotice(formatUserErrorMessage(err, "Could not remove friend."));
+    } finally {
+      setBusyAction(null);
     }
   };
 
   const handleCreateCompetition = async () => {
-    if (!profile) return;
+    if (!profile || busyAction) return;
+    if (!f.serverOnline) {
+      setSocialNotice("You're offline. Connect to the internet to create a competition.");
+      return;
+    }
     setSocialNotice(null);
+    setBusyAction("createComp");
     try {
       const created = await createCompetition({
         profile,
@@ -212,46 +269,69 @@ function SocialScreen() {
       setCompetitions((prev) => [created, ...prev]);
       setSocialNotice(`Competition "${created.title}" created. Invite code: ${created.inviteCode}`);
     } catch (err) {
-      setSocialNotice(err instanceof Error ? err.message : "Could not create competition.");
+      setSocialNotice(formatUserErrorMessage(err, "Could not create competition."));
+    } finally {
+      setBusyAction(null);
     }
   };
 
   const handleJoinCompetition = async () => {
-    if (!profile || !joinCode.trim()) return;
+    if (!profile || !joinCode.trim() || busyAction) return;
+    if (!f.serverOnline) {
+      setSocialNotice("You're offline. Connect to the internet to join a competition.");
+      return;
+    }
     setSocialNotice(null);
+    setBusyAction("joinComp");
     try {
       const joined = await joinCompetitionByCode(profile, joinCode);
       setJoinCode("");
       await loadSocialData();
       setSocialNotice(`Joined "${joined.title}".`);
     } catch (err) {
-      setSocialNotice(err instanceof Error ? err.message : "Invalid invite code.");
+      setSocialNotice(formatUserErrorMessage(err, "Invalid invite code."));
+    } finally {
+      setBusyAction(null);
     }
   };
 
   const openCompetitionDetail = async (comp: CompetitionSummary) => {
     setActiveComp(comp);
+    setActiveCompMembers([]);
+    setLoadingCompMembers(true);
     try {
       const members = await fetchCompetitionMembers(comp.id);
       setActiveCompMembers(members);
-    } catch {
+    } catch (err) {
       setActiveCompMembers([]);
+      setSocialNotice(formatUserErrorMessage(err, "Could not load competition standings."));
+    } finally {
+      setLoadingCompMembers(false);
     }
   };
 
   const copyInvite = async (code: string) => {
     const shareText = `${window.location.origin}/social?join=${code}`;
     try {
-      await navigator.clipboard.writeText(shareText);
-      setCopiedCode(code);
-      window.setTimeout(() => setCopiedCode(null), 2000);
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareText);
+        setCopiedCode(code);
+        window.setTimeout(() => setCopiedCode(null), 2000);
+        return;
+      }
+      setSocialNotice(`Invite code: ${code}`);
     } catch {
       setSocialNotice(`Invite code: ${code}`);
     }
   };
 
   const handleCreateRoom = async () => {
-    if (!user) return;
+    if (!user || busyAction) return;
+    if (!f.serverOnline) {
+      setSocialNotice("You're offline. Connect to the internet to create a room.");
+      return;
+    }
+    setBusyAction("createRoom");
     try {
       const created = await createFocusRoomLobby({
         hostId: user.uid,
@@ -262,7 +342,9 @@ function SocialScreen() {
       setRoomName("");
       setRoomOpen(false);
     } catch (err) {
-      setSocialNotice(err instanceof Error ? err.message : "Could not create room.");
+      setSocialNotice(formatUserErrorMessage(err, "Could not create room."));
+    } finally {
+      setBusyAction(null);
     }
   };
 
@@ -466,11 +548,12 @@ function SocialScreen() {
                       ) : (
                         <button
                           type="button"
+                          disabled={Boolean(busyAction)}
                           onClick={() => void handleSendRequest(res.userId)}
-                          className="press flex items-center gap-1 rounded-full bg-secondary px-3 py-1.5 text-xs font-medium text-foreground"
+                          className="press flex items-center gap-1 rounded-full bg-secondary px-3 py-1.5 text-xs font-medium text-foreground disabled:opacity-40"
                         >
                           <UserPlus className="size-3.5" />
-                          Add
+                          {busyAction === `send:${res.userId}` ? "Sending..." : "Add"}
                         </button>
                       )}
                     </div>
@@ -494,19 +577,17 @@ function SocialScreen() {
                       <div className="flex gap-1.5">
                         <button
                           type="button"
-                          onClick={() =>
-                            void respondFriendRequest(req.friendshipId, true).then(loadSocialData)
-                          }
-                          className="press rounded-full bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground"
+                          disabled={Boolean(busyAction)}
+                          onClick={() => void handleRespondRequest(req.friendshipId, true)}
+                          className="press rounded-full bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground disabled:opacity-40"
                         >
-                          Accept
+                          {busyAction === `respond:${req.friendshipId}` ? "..." : "Accept"}
                         </button>
                         <button
                           type="button"
-                          onClick={() =>
-                            void respondFriendRequest(req.friendshipId, false).then(loadSocialData)
-                          }
-                          className="press rounded-full bg-card px-3 py-1 text-xs font-medium text-muted-foreground"
+                          disabled={Boolean(busyAction)}
+                          onClick={() => void handleRespondRequest(req.friendshipId, false)}
+                          className="press rounded-full bg-card px-3 py-1 text-xs font-medium text-muted-foreground disabled:opacity-40"
                         >
                           Decline
                         </button>
@@ -533,7 +614,11 @@ function SocialScreen() {
                   >
                     <button
                       type="button"
-                      onClick={() => fr.profile && setSelectedFriend(fr.profile)}
+                      onClick={() =>
+                        fr.profile
+                          ? setSelectedFriend(fr.profile)
+                          : setSocialNotice("This friend's profile stats are currently private.")
+                      }
                       className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
                     >
                       <AvatarBadge
@@ -554,11 +639,12 @@ function SocialScreen() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => void removeFriendship(fr.friendshipId).then(loadSocialData)}
+                      disabled={Boolean(busyAction)}
+                      onClick={() => void handleRemoveFriend(fr.friendshipId)}
                       aria-label={`Remove ${fr.profile?.username ?? "friend"}`}
-                      className="press rounded-full px-2.5 py-1 text-xs text-muted-foreground hover:text-coral"
+                      className="press rounded-full px-2.5 py-1 text-xs text-muted-foreground hover:text-coral disabled:opacity-40"
                     >
-                      Remove
+                      {busyAction === `remove:${fr.friendshipId}` ? "Removing..." : "Remove"}
                     </button>
                   </div>
                 ))}
@@ -602,10 +688,10 @@ function SocialScreen() {
               <button
                 type="button"
                 onClick={() => void handleJoinCompetition()}
-                disabled={!joinCode.trim()}
+                disabled={!joinCode.trim() || busyAction === "joinComp"}
                 className="press h-10 rounded-full bg-secondary px-4 text-xs font-semibold text-foreground disabled:opacity-40"
               >
-                Join
+                {busyAction === "joinComp" ? "Joining..." : "Join"}
               </button>
             </div>
 
@@ -687,12 +773,17 @@ function SocialScreen() {
           {rooms.length > 0 && (
             <div className="mt-3 divide-y divide-border border-t border-border pt-2">
               {rooms.map((r) => (
-                <div key={r.id} className="flex items-center justify-between gap-2 py-2.5 text-xs">
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => setSelectedRoom(r)}
+                  className="press flex w-full items-center justify-between gap-2 py-2.5 text-left text-xs transition-colors hover:text-primary"
+                >
                   <span className="truncate font-medium">{r.name}</span>
                   <span className="shrink-0 text-muted-foreground tabular-nums">
                     {r.sessionMinutes}m · {r.status}
                   </span>
-                </div>
+                </button>
               ))}
             </div>
           )}
@@ -700,8 +791,18 @@ function SocialScreen() {
       </section>
 
       {/* Edit Profile Sheet */}
-      <Sheet open={editOpen} onClose={() => setEditOpen(false)}>
-        <h2 className="text-xl font-semibold">Edit profile</h2>
+      <Sheet open={editOpen} onClose={() => setEditOpen(false)} ariaLabel="Edit profile">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-xl font-semibold">Edit profile</h2>
+          <button
+            type="button"
+            onClick={() => setEditOpen(false)}
+            aria-label="Close profile editor"
+            className="press flex min-h-10 min-w-10 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
         <div className="mt-5 space-y-4">
           <label className="block">
             <span className="text-xs font-medium text-muted-foreground">Username</span>
@@ -844,8 +945,22 @@ function SocialScreen() {
       </Sheet>
 
       {/* Create Private Competition Sheet */}
-      <Sheet open={createCompOpen} onClose={() => setCreateCompOpen(false)}>
-        <h2 className="text-xl font-semibold">Create private competition</h2>
+      <Sheet
+        open={createCompOpen}
+        onClose={() => setCreateCompOpen(false)}
+        ariaLabel="Create private competition"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-xl font-semibold">Create private competition</h2>
+          <button
+            type="button"
+            onClick={() => setCreateCompOpen(false)}
+            aria-label="Close create competition"
+            className="press flex min-h-10 min-w-10 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
         <div className="mt-4 space-y-3">
           <input
             type="text"
@@ -884,15 +999,19 @@ function SocialScreen() {
           </div>
           <PillButton
             onClick={() => void handleCreateCompetition()}
-            disabled={compTitle.trim().length < 3}
+            disabled={compTitle.trim().length < 3 || busyAction === "createComp"}
           >
-            Create &amp; generate invite code
+            {busyAction === "createComp" ? "Creating..." : "Create & generate invite code"}
           </PillButton>
         </div>
       </Sheet>
 
       {/* Competition Detail Sheet */}
-      <Sheet open={Boolean(activeComp)} onClose={() => setActiveComp(null)}>
+      <Sheet
+        open={Boolean(activeComp)}
+        onClose={() => setActiveComp(null)}
+        ariaLabel="Competition details"
+      >
         {activeComp && (
           <div>
             <div className="flex items-start justify-between gap-2">
@@ -908,23 +1027,31 @@ function SocialScreen() {
               <p className="mt-2 text-sm text-muted-foreground">{activeComp.description}</p>
             )}
             <div className="mt-4 divide-y divide-border rounded-2xl border border-border px-3">
-              {activeCompMembers.map((m, idx) => (
-                <div
-                  key={m.userId}
-                  className="flex items-center justify-between gap-3 py-2.5 text-sm"
-                >
-                  <div className="flex min-w-0 items-center gap-2.5">
-                    <span className="w-5 text-xs font-semibold text-muted-foreground tabular-nums">
-                      #{idx + 1}
+              {loadingCompMembers ? (
+                <p className="py-4 text-center text-xs text-muted-foreground">
+                  Loading standings...
+                </p>
+              ) : activeCompMembers.length === 0 ? (
+                <p className="py-4 text-center text-xs text-muted-foreground">No members yet.</p>
+              ) : (
+                activeCompMembers.map((m, idx) => (
+                  <div
+                    key={m.userId}
+                    className="flex items-center justify-between gap-3 py-2.5 text-sm"
+                  >
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <span className="w-5 text-xs font-semibold text-muted-foreground tabular-nums">
+                        #{idx + 1}
+                      </span>
+                      <AvatarBadge username={m.username} avatarId={m.avatarId} size="sm" />
+                      <span className="truncate font-medium">@{m.username}</span>
+                    </div>
+                    <span className="shrink-0 font-semibold tabular-nums">
+                      {formatMinutes(m.totalMinutes)}
                     </span>
-                    <AvatarBadge username={m.username} avatarId={m.avatarId} size="sm" />
-                    <span className="truncate font-medium">@{m.username}</span>
                   </div>
-                  <span className="shrink-0 font-semibold tabular-nums">
-                    {formatMinutes(m.totalMinutes)}
-                  </span>
-                </div>
-              ))}
+                ))
+              )}
             </div>
             <div className="mt-4">
               <PillButton variant="ghost" onClick={() => setActiveComp(null)}>
@@ -936,8 +1063,18 @@ function SocialScreen() {
       </Sheet>
 
       {/* Create Focus Room Lobby Sheet */}
-      <Sheet open={roomOpen} onClose={() => setRoomOpen(false)}>
-        <h2 className="text-xl font-semibold">Create focus room lobby</h2>
+      <Sheet open={roomOpen} onClose={() => setRoomOpen(false)} ariaLabel="Create focus room">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-xl font-semibold">Create focus room lobby</h2>
+          <button
+            type="button"
+            onClick={() => setRoomOpen(false)}
+            aria-label="Close create room"
+            className="press flex min-h-10 min-w-10 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
         <p className="mt-1 text-xs text-muted-foreground">
           Prepares a shared lobby entry for upcoming live group sessions.
         </p>
@@ -951,10 +1088,45 @@ function SocialScreen() {
             placeholder="e.g. Late Night Study Hall"
             className="h-11 w-full rounded-2xl border border-border bg-background px-3.5 text-sm outline-hidden focus:border-primary"
           />
-          <PillButton onClick={() => void handleCreateRoom()} disabled={roomName.trim().length < 3}>
-            Create room
+          <PillButton
+            onClick={() => void handleCreateRoom()}
+            disabled={roomName.trim().length < 3 || busyAction === "createRoom"}
+          >
+            {busyAction === "createRoom" ? "Creating..." : "Create room"}
           </PillButton>
         </div>
+      </Sheet>
+
+      {/* Focus Room Detail Sheet */}
+      <Sheet
+        open={Boolean(selectedRoom)}
+        onClose={() => setSelectedRoom(null)}
+        ariaLabel="Focus room details"
+      >
+        {selectedRoom && (
+          <div>
+            <h2 className="text-xl font-semibold">{selectedRoom.name}</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {selectedRoom.sessionMinutes} min session · Status: {selectedRoom.status}
+            </p>
+            <div className="mt-5 space-y-2">
+              <PillButton
+                onClick={() => {
+                  if (f.timer.status === "idle") {
+                    f.selectMinutes(selectedRoom.sessionMinutes);
+                  }
+                  setSelectedRoom(null);
+                  void navigate({ to: "/" });
+                }}
+              >
+                Open {selectedRoom.sessionMinutes} min timer
+              </PillButton>
+              <PillButton variant="ghost" onClick={() => setSelectedRoom(null)}>
+                Close
+              </PillButton>
+            </div>
+          </div>
+        )}
       </Sheet>
 
       <div className="flex-1" />

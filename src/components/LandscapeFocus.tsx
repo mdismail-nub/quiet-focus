@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Check,
   CloudOff,
+  Image as ImageIcon,
   Maximize,
   Minimize,
   Pause,
@@ -14,12 +15,14 @@ import {
 import { useFocus } from "@/lib/focus-store";
 import { formatClock } from "@/lib/stats";
 import type { Ambient } from "@/lib/ambient";
+import { clampBackgroundDim } from "@/lib/custom-background-db";
 import {
   isFullscreenActive,
   isFullscreenSupported,
   onFullscreenChange,
   toggleFullscreen,
 } from "@/lib/fullscreen";
+import { CustomBackgroundControls } from "@/components/CustomBackgroundControls";
 import { cn } from "@/lib/utils";
 
 const PRESETS = [25, 50, 90];
@@ -34,13 +37,17 @@ const AMBIENT_OPTIONS: { id: Ambient; label: string }[] = [
 
 export function LandscapeFocus({ onExit }: { onExit: () => void }) {
   const f = useFocus();
-  const { timer, settings } = f;
+  const { timer, settings, notificationPrefs } = f;
   const [fsSupported, setFsSupported] = useState(false);
   const [fsActive, setFsActive] = useState(false);
   const [chromeActive, setChromeActive] = useState(true);
   const [ambientOpen, setAmbientOpen] = useState(false);
+  const [bgOpen, setBgOpen] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const hasCustomBg = Boolean(settings.customBackgroundEnabled && f.customBackgroundUrl);
+  const showBreakOffer = settings.pomodoro || notificationPrefs.breakReminders;
 
   const active = timer.status === "running" || timer.status === "paused";
   const isRunning = timer.status === "running";
@@ -58,7 +65,20 @@ export function LandscapeFocus({ onExit }: { onExit: () => void }) {
   }, []);
 
   useEffect(() => {
-    if (!isRunning || ambientOpen || confirmEnd) {
+    if (!ambientOpen && !bgOpen && !confirmEnd) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setAmbientOpen(false);
+        setBgOpen(false);
+        setConfirmEnd(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [ambientOpen, bgOpen, confirmEnd]);
+
+  useEffect(() => {
+    if (!isRunning || ambientOpen || bgOpen || confirmEnd) {
       setChromeActive(true);
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
       return;
@@ -81,9 +101,9 @@ export function LandscapeFocus({ onExit }: { onExit: () => void }) {
       window.removeEventListener("touchstart", wakeChrome);
       window.removeEventListener("keydown", wakeChrome);
     };
-  }, [isRunning, ambientOpen, confirmEnd]);
+  }, [isRunning, ambientOpen, bgOpen, confirmEnd]);
 
-  const themeClass = `landscape-${settings.landscapeTheme}`;
+  const themeClass = hasCustomBg ? "landscape-custom-bg" : `landscape-${settings.landscapeTheme}`;
   const chromeOpacity =
     isRunning && !chromeActive
       ? "opacity-45 hover:opacity-100 focus-within:opacity-100"
@@ -110,6 +130,22 @@ export function LandscapeFocus({ onExit }: { onExit: () => void }) {
       )}
       onPointerDown={() => setChromeActive(true)}
     >
+      {hasCustomBg && f.customBackgroundUrl && (
+        <div
+          aria-hidden="true"
+          data-testid="landscape-custom-background"
+          className="pointer-events-none absolute inset-0 z-0 overflow-hidden"
+        >
+          <img src={f.customBackgroundUrl} alt="" className="size-full object-cover" />
+          <div
+            className="absolute inset-0"
+            style={{
+              backgroundColor: `rgba(12, 13, 18, ${clampBackgroundDim(settings.customBackgroundDim)})`,
+            }}
+          />
+        </div>
+      )}
+
       {/* Top discreet bar */}
       <header
         className={cn(
@@ -137,7 +173,28 @@ export function LandscapeFocus({ onExit }: { onExit: () => void }) {
         <div className="flex shrink-0 items-center gap-1.5">
           <button
             type="button"
-            onClick={() => setAmbientOpen((v) => !v)}
+            onClick={() => {
+              setAmbientOpen(false);
+              setBgOpen((v) => !v);
+            }}
+            aria-label="Customize landscape background"
+            className="press flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-full px-3 text-xs font-medium text-[var(--lf-muted)] transition-colors hover:bg-[var(--lf-surface)] hover:text-[var(--lf-fg)]"
+          >
+            <ImageIcon
+              className={cn("size-4", hasCustomBg && "text-[var(--lf-accent)]")}
+              strokeWidth={1.75}
+            />
+            <span className="hidden whitespace-nowrap sm:inline">
+              {hasCustomBg ? "Custom bg" : "Background"}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setBgOpen(false);
+              setAmbientOpen((v) => !v);
+            }}
             aria-label={`Ambient sound: ${ambientLabel}`}
             className="press flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-full px-3 text-xs font-medium text-[var(--lf-muted)] transition-colors hover:bg-[var(--lf-surface)] hover:text-[var(--lf-fg)]"
           >
@@ -177,7 +234,7 @@ export function LandscapeFocus({ onExit }: { onExit: () => void }) {
       </header>
 
       {/* Center focal stage */}
-      <main className="relative z-0 flex flex-1 flex-col items-center justify-center px-4 text-center">
+      <main className="relative z-10 flex flex-1 flex-col items-center justify-center px-4 text-center">
         {timer.status === "completed" ? (
           <div className="flex flex-col items-center">
             <div className="relative flex size-20 items-center justify-center sm:size-24">
@@ -238,7 +295,7 @@ export function LandscapeFocus({ onExit }: { onExit: () => void }) {
       >
         {timer.status === "completed" ? (
           <div className="flex flex-wrap items-center justify-center gap-3">
-            {settings.pomodoro && (
+            {showBreakOffer && (
               <button
                 type="button"
                 onClick={f.startBreak}
@@ -255,7 +312,7 @@ export function LandscapeFocus({ onExit }: { onExit: () => void }) {
               }}
               className={cn(
                 "press min-h-11 rounded-full px-6 text-sm font-semibold whitespace-nowrap",
-                settings.pomodoro
+                showBreakOffer
                   ? "bg-[var(--lf-surface)] text-[var(--lf-fg)] hover:bg-[var(--lf-surface-strong)]"
                   : "bg-[var(--lf-pill-bg)] text-[var(--lf-pill-fg)]",
               )}
@@ -387,6 +444,7 @@ export function LandscapeFocus({ onExit }: { onExit: () => void }) {
         >
           <div
             role="dialog"
+            aria-modal="true"
             aria-label="Ambient sound"
             onClick={(e) => e.stopPropagation()}
             className="screen-in w-full max-w-sm rounded-3xl border border-[var(--lf-border)] bg-[var(--lf-sheet)] p-5 text-[var(--lf-fg)] shadow-xl"
@@ -424,6 +482,37 @@ export function LandscapeFocus({ onExit }: { onExit: () => void }) {
                   </button>
                 );
               })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Discreet custom background picker overlay */}
+      {bgOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4"
+          onClick={() => setBgOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Focus background"
+            onClick={(e) => e.stopPropagation()}
+            className="screen-in max-h-[85dvh] w-full max-w-md overflow-y-auto rounded-3xl border border-border bg-card p-5 text-foreground shadow-xl"
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold">Focus background</h2>
+              <button
+                type="button"
+                onClick={() => setBgOpen(false)}
+                aria-label="Close background menu"
+                className="press flex min-h-11 min-w-11 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+            <div className="mt-3">
+              <CustomBackgroundControls compact />
             </div>
           </div>
         </div>

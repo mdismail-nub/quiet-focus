@@ -1,10 +1,14 @@
 export function TimerRing({
   progress,
   size = 280,
+  ringFill = "var(--color-card)",
+  trackStroke = "var(--color-track)",
   children,
 }: {
   progress: number;
   size?: number;
+  ringFill?: string;
+  trackStroke?: string;
   children: React.ReactNode;
 }) {
   const r = 46;
@@ -15,14 +19,7 @@ export function TimerRing({
       style={{ width: size, height: size, maxWidth: "78vw", maxHeight: "78vw" }}
     >
       <svg viewBox="0 0 100 100" className="size-full -rotate-90">
-        <circle
-          cx="50"
-          cy="50"
-          r={r}
-          fill="var(--color-card)"
-          stroke="var(--color-track)"
-          strokeWidth="1.6"
-        />
+        <circle cx="50" cy="50" r={r} fill={ringFill} stroke={trackStroke} strokeWidth="1.6" />
         <circle
           cx="50"
           cy="50"

@@ -153,18 +153,24 @@ export function NotificationsScreen() {
   const badge = permissionBadgeInfo(perm);
 
   const [browserOnline, setBrowserOnline] = useState(() =>
-    typeof navigator !== "undefined" ? navigator.onLine : true,
+    typeof window !== "undefined" &&
+    typeof navigator !== "undefined" &&
+    typeof navigator.onLine === "boolean"
+      ? navigator.onLine
+      : true,
   );
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [enabling, setEnabling] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [customTimeInput, setCustomTimeInput] = useState("11:30");
+  const [customTimeNotice, setCustomTimeNotice] = useState<string | null>(null);
   const [previewCategory, setPreviewCategory] = useState<NotificationCategory>("focus");
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
 
   useEffect(() => {
-    const syncOnline = () => setBrowserOnline(navigator.onLine);
+    const syncOnline = () => setBrowserOnline(navigator.onLine !== false);
+    syncOnline();
     window.addEventListener("online", syncOnline);
     window.addEventListener("offline", syncOnline);
     return () => {
@@ -183,25 +189,34 @@ export function NotificationsScreen() {
     setActionMessage(null);
     if (perm === "denied" || perm === "unsupported") return;
     setEnabling(true);
-    const res = await f.enableCompanionNotifications();
-    setEnabling(false);
-    if (!res.ok) {
-      setActionMessage(
-        res.error ?? "Notifications remain off. You can try again whenever you're ready.",
-      );
-    } else if (res.offline) {
-      setActionMessage(
-        "Notifications enabled on this device. Background push scheduling will connect when online.",
-      );
-    } else {
-      setActionMessage("Focus Companion notifications are enabled.");
+    try {
+      const res = await f.enableCompanionNotifications();
+      if (!res.ok) {
+        setActionMessage(
+          res.error ?? "Notifications remain off. You can try again whenever you're ready.",
+        );
+      } else if (res.offline) {
+        setActionMessage(
+          "Notifications enabled on this device. Background push scheduling will connect when online.",
+        );
+      } else {
+        setActionMessage("Focus Companion notifications are enabled.");
+      }
+    } catch {
+      setActionMessage("Could not enable notifications right now. Please try again.");
+    } finally {
+      setEnabling(false);
     }
   };
 
   const handleMasterToggle = async (next: boolean) => {
     setActionMessage(null);
     if (!next) {
-      await f.disableCompanionNotifications();
+      try {
+        await f.disableCompanionNotifications();
+      } catch {
+        setActionMessage("Could not pause notifications cleanly. Preferences updated locally.");
+      }
       return;
     }
     if (perm === "granted") {
@@ -230,22 +245,39 @@ export function NotificationsScreen() {
   };
 
   const addCustomTime = () => {
-    if (!isValidHHMM(customTimeInput)) return;
-    if (p.customTimes.includes(customTimeInput) || p.customTimes.length >= 3) return;
+    setCustomTimeNotice(null);
+    if (!isValidHHMM(customTimeInput)) {
+      setCustomTimeNotice("Please pick a valid time.");
+      return;
+    }
+    if (p.customTimes.includes(customTimeInput)) {
+      setCustomTimeNotice(`${formatHHMM12Hour(customTimeInput)} is already added.`);
+      return;
+    }
+    if (p.customTimes.length >= 3) {
+      setCustomTimeNotice("You can add up to 3 custom reminder times.");
+      return;
+    }
     const next = [...p.customTimes, customTimeInput].sort();
     f.setNotificationPrefs({ customTimes: next });
   };
 
   const removeCustomTime = (time: string) => {
+    setCustomTimeNotice(null);
     f.setNotificationPrefs({ customTimes: p.customTimes.filter((t) => t !== time) });
   };
 
   const handleTest = async () => {
     setTesting(true);
     setTestResult(null);
-    const res = await f.sendTestCompanionNotification();
-    setTesting(false);
-    setTestResult(res.message);
+    try {
+      const res = await f.sendTestCompanionNotification();
+      setTestResult(res.message);
+    } catch {
+      setTestResult("Could not send a test notification in this browser context.");
+    } finally {
+      setTesting(false);
+    }
   };
 
   return (
@@ -364,7 +396,7 @@ export function NotificationsScreen() {
           <Toggle
             label="Enable all notifications"
             on={p.enabled && perm === "granted"}
-            disabled={perm === "denied" || perm === "unsupported"}
+            disabled={enabling || perm === "denied" || perm === "unsupported"}
             onChange={(v) => void handleMasterToggle(v)}
           />
         </Row>
@@ -507,7 +539,10 @@ export function NotificationsScreen() {
               type="time"
               aria-label="New custom reminder time"
               value={customTimeInput}
-              onChange={(e) => setCustomTimeInput(e.target.value)}
+              onChange={(e) => {
+                setCustomTimeNotice(null);
+                setCustomTimeInput(e.target.value);
+              }}
               className="min-h-11 rounded-xl border border-border bg-secondary/50 px-3 text-sm font-medium tabular-nums"
             />
             <button
@@ -520,6 +555,10 @@ export function NotificationsScreen() {
               Add time
             </button>
           </div>
+
+          {customTimeNotice && (
+            <p className="mt-2 text-xs text-muted-foreground">{customTimeNotice}</p>
+          )}
 
           {p.customTimes.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-2">
@@ -611,7 +650,10 @@ export function NotificationsScreen() {
           </div>
         </div>
 
-        <Row label="Notification sound" hint="Play chime/tone alongside system alerts">
+        <Row
+          label="Notification sound"
+          hint="Plays a gentle chime when focus ends, a break starts, or alerts fire"
+        >
           <Toggle
             label="Notification sound"
             on={p.sound}
@@ -695,6 +737,15 @@ export function NotificationsScreen() {
               {testing ? "Sending test…" : "Send test notification"}
             </span>
           </PillButton>
+          {perm !== "granted" && (
+            <p className="text-center text-xs text-muted-foreground">
+              {perm === "denied"
+                ? "Allow notifications in your browser site settings first to send a test alert."
+                : perm === "unsupported"
+                  ? "System notifications are unsupported in this browser."
+                  : "Tap Enable Focus Notifications above first to send a test alert."}
+            </p>
+          )}
           {testResult && <p className="text-center text-xs text-muted-foreground">{testResult}</p>}
           <p className="flex items-center justify-center gap-1.5 pt-1 text-[11px] text-muted-foreground">
             <ShieldCheck className="size-3.5 text-primary" />

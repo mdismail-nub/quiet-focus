@@ -248,6 +248,20 @@
   --lf-border: rgba(236, 241, 236, 0.14);
 }
 
+.landscape-custom-bg {
+  --lf-bg: #0c0d10;
+  --lf-fg: #ffffff;
+  --lf-muted: rgba(255, 255, 255, 0.78);
+  --lf-accent: #ff9f43;
+  --lf-track: rgba(255, 255, 255, 0.22);
+  --lf-surface: rgba(15, 16, 22, 0.56);
+  --lf-surface-strong: rgba(15, 16, 22, 0.76);
+  --lf-pill-bg: #ffffff;
+  --lf-pill-fg: #111318;
+  --lf-sheet: rgba(18, 20, 26, 0.94);
+  --lf-border: rgba(255, 255, 255, 0.18);
+}
+
 .landscape-stage {
   background: var(--lf-bg);
   color: var(--lf-fg);

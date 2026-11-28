@@ -11,7 +11,13 @@ import {
 import { onAuthStateChanged, signInWithPopup, signOut, type User } from "firebase/auth";
 import { remainingMs, type Session } from "./stats";
 import { startAmbient, type Ambient } from "./ambient";
-import { auth, formatFirebaseAuthError, googleProvider, testConnection } from "./firebase";
+import {
+  auth,
+  formatFirebaseAuthError,
+  formatUserErrorMessage,
+  googleProvider,
+  testConnection,
+} from "./firebase";
 import {
   computeAnalytics,
   computeGamificationSummary,
@@ -56,6 +62,7 @@ import {
   closeAppNotificationsByTag,
   getNotificationSupport,
   getPermissionState,
+  refreshPermissionState,
   requestNotificationPermissionExplicit,
   sendServerOrLocalTestNotification,
   showAppNotification,
@@ -63,6 +70,28 @@ import {
   syncSessionScheduleToServer,
   type NotificationSupportInfo,
 } from "./notification-client";
+import {
+  hideNativeSplashScreen,
+  isCapacitorNative,
+  registerNativeAppLifecycle,
+  registerNativeNotificationActionListener,
+  syncNativeStatusBar,
+  triggerNativeHaptic,
+} from "./capacitor-native";
+import {
+  playGentleChime,
+  shouldPlayTimerChime,
+  warmUpChimeAudio,
+  type ChimeEvent,
+  type ChimeTone,
+} from "./sound-notifications";
+import {
+  clampBackgroundDim,
+  deleteCustomBackground,
+  loadCustomBackground,
+  processUploadedBackgroundFile,
+  saveCustomBackground,
+} from "./custom-background-db";
 
 export type Theme = "light" | "dark" | "system";
 export type LandscapeTheme = "minimal" | "midnight" | "sunset" | "forest";
@@ -70,6 +99,8 @@ export type Settings = {
   defaultMinutes: number;
   customMinutes: number;
   sound: boolean;
+  chimeTone: ChimeTone;
+  chimeVolume: number;
   notify: boolean;
   theme: Theme;
   landscapeTheme: LandscapeTheme;
@@ -78,6 +109,9 @@ export type Settings = {
   breakMinutes: number;
   dailyGoal: number;
   keepAwake: boolean;
+  customBackgroundEnabled: boolean;
+  customBackgroundName: string;
+  customBackgroundDim: number;
 };
 export type Timer = {
   minutes: number;
@@ -96,6 +130,8 @@ const DEFAULT_SETTINGS: Settings = {
   defaultMinutes: 25,
   customMinutes: 15,
   sound: true,
+  chimeTone: "gentle-bell",
+  chimeVolume: 0.6,
   notify: false,
   theme: "system",
   landscapeTheme: "minimal",
@@ -104,6 +140,9 @@ const DEFAULT_SETTINGS: Settings = {
   breakMinutes: 5,
   dailyGoal: 60,
   keepAwake: true,
+  customBackgroundEnabled: false,
+  customBackgroundName: "",
+  customBackgroundDim: 0.4,
 };
 
 const idle = (m: number, label = "", scheduleVersion = 0): Timer => ({
@@ -207,29 +246,17 @@ type Ctx = {
     via: "push" | "local" | "none";
     message: string;
   }>;
+  previewChime: (event?: ChimeEvent, tone?: ChimeTone, volume?: number) => void;
+  // Custom focus background
+  customBackgroundUrl: string | null;
+  customBackgroundBusy: boolean;
+  customBackgroundError: string | null;
+  uploadCustomBackground: (file: File) => Promise<boolean>;
+  clearCustomBackground: () => Promise<void>;
+  clearCustomBackgroundError: () => void;
 };
 
 const FocusCtx = createContext<Ctx | null>(null);
-
-function chime() {
-  try {
-    const ac = new AudioContext();
-    [660, 880].forEach((f, i) => {
-      const o = ac.createOscillator();
-      const g = ac.createGain();
-      o.frequency.value = f;
-      const t = ac.currentTime + i * 0.25;
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.2, t + 0.03);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.9);
-      o.connect(g).connect(ac.destination);
-      o.start(t);
-      o.stop(t + 1);
-    });
-  } catch {
-    // AudioContext may be unavailable or blocked before user gesture.
-  }
-}
 
 export function FocusProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
@@ -268,6 +295,9 @@ export function FocusProvider({ children }: { children: ReactNode }) {
   const [pushSubscribed, setPushSubscribed] = useState(false);
   const [pushSyncPending, setPushSyncPending] = useState(false);
   const [notificationSyncError, setNotificationSyncError] = useState<string | null>(null);
+  const [customBackgroundUrl, setCustomBackgroundUrl] = useState<string | null>(null);
+  const [customBackgroundBusy, setCustomBackgroundBusy] = useState(false);
+  const [customBackgroundError, setCustomBackgroundError] = useState<string | null>(null);
 
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -285,7 +315,9 @@ export function FocusProvider({ children }: { children: ReactNode }) {
 
   // Initial load from localStorage & IndexedDB
   useEffect(() => {
+    let active = true;
     const s = load("focus.settings", DEFAULT_SETTINGS);
+    s.customBackgroundDim = clampBackgroundDim(s.customBackgroundDim);
     setSettingsState(s);
 
     const rawSessions = loadJson<Session[]>("focus.sessions", []);
@@ -298,7 +330,7 @@ export function FocusProvider({ children }: { children: ReactNode }) {
     const loadedQueue = loadSyncQueue();
     setSyncQueue(loadedQueue);
     if (loadedQueue.length > 0) {
-      setSyncStatus(navigator.onLine ? "waiting" : "offline");
+      setSyncStatus(navigator.onLine !== false ? "waiting" : "offline");
       wasOfflineOrPendingRef.current = true;
     }
 
@@ -310,25 +342,52 @@ export function FocusProvider({ children }: { children: ReactNode }) {
       loadedTimer.sessionId = createSessionId(loadedTimer.startedAt || Date.now());
       loadedTimer.scheduleVersion = loadedTimer.scheduleVersion ?? 1;
     }
+    timerRef.current = loadedTimer;
     setTimer(loadedTimer);
     setNotificationSupport(getNotificationSupport());
     setNotificationPermission(getPermissionState());
     setReady(true);
 
-    void loadNotificationRecord().then((rec) => {
-      if (!notificationPrefsModifiedRef.current) {
-        const migratedPrefs =
-          s.notify && !rec.preferences.enabled && getPermissionState() === "granted"
-            ? { ...rec.preferences, enabled: true }
-            : rec.preferences;
-        notificationPrefsRef.current = migratedPrefs;
-        setNotificationPrefsState(migratedPrefs);
-      }
-      setPushSubscribed(Boolean(rec.pushEndpoint));
-      setPushSyncPending(rec.pendingSync);
-    });
+    if (isCapacitorNative()) {
+      void hideNativeSplashScreen();
+      void refreshPermissionState().then((perm) => {
+        if (active) setNotificationPermission(perm);
+      });
+    }
 
-    void testConnection();
+    void loadNotificationRecord()
+      .then((rec) => {
+        if (!active) return;
+        if (!notificationPrefsModifiedRef.current) {
+          const migratedPrefs =
+            s.notify && !rec.preferences.enabled && getPermissionState() === "granted"
+              ? { ...rec.preferences, enabled: true }
+              : rec.preferences;
+          notificationPrefsRef.current = migratedPrefs;
+          setNotificationPrefsState(migratedPrefs);
+        }
+        setPushSubscribed(Boolean(rec.pushEndpoint));
+        setPushSyncPending(rec.pendingSync);
+      })
+      .catch(() => {
+        // IndexedDB may be unavailable in restricted contexts
+      });
+
+    void loadCustomBackground()
+      .then((bg) => {
+        if (!active || !bg) return;
+        setCustomBackgroundUrl(bg.dataUrl);
+        if (bg.name && !settingsRef.current.customBackgroundName) {
+          setSettingsState((prev) => ({ ...prev, customBackgroundName: bg.name }));
+        }
+      })
+      .catch(() => {
+        // IndexedDB may be unavailable in restricted contexts
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -361,15 +420,20 @@ export function FocusProvider({ children }: { children: ReactNode }) {
     if (ready) localStorage.setItem("focus.challenges", JSON.stringify(claimedChallenges));
   }, [claimedChallenges, ready]);
 
-  // App Light / Dark theme
+  // App Light / Dark theme + native Android status bar styling
   useEffect(() => {
     const root = document.documentElement;
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const apply = () =>
-      root.classList.toggle(
-        "dark",
-        settings.theme === "dark" || (settings.theme === "system" && mq.matches),
-      );
+    const apply = () => {
+      const dark = settings.theme === "dark" || (settings.theme === "system" && mq.matches);
+      root.classList.toggle("dark", dark);
+      if (isCapacitorNative()) {
+        void syncNativeStatusBar({
+          dark,
+          backgroundColor: dark ? "#29292b" : "#f5f5f5",
+        });
+      }
+    };
     apply();
     mq.addEventListener("change", apply);
     return () => mq.removeEventListener("change", apply);
@@ -377,22 +441,28 @@ export function FocusProvider({ children }: { children: ReactNode }) {
 
   // Firebase Auth listener
   useEffect(() => {
+    let active = true;
     const unsub = onAuthStateChanged(auth, async (nextUser) => {
+      if (!active) return;
       setUser(nextUser);
       setAuthError(null);
       if (nextUser) {
+        void testConnection();
         try {
           const prof = await ensureUserProfile(nextUser, settingsRef.current.dailyGoal);
-          setProfile(prof);
+          if (active) setProfile(prof);
         } catch (err) {
-          setAuthError(err instanceof Error ? err.message : "Could not load profile.");
+          if (active) setAuthError(formatUserErrorMessage(err, "Could not load your profile."));
         }
       } else {
         setProfile(null);
       }
-      setAuthReady(true);
+      if (active) setAuthReady(true);
     });
-    return () => unsub();
+    return () => {
+      active = false;
+      unsub();
+    };
   }, []);
 
   const refreshProfile = useCallback(async () => {
@@ -468,11 +538,15 @@ export function FocusProvider({ children }: { children: ReactNode }) {
         }
       } else {
         setSyncStatus(result.status);
-        setLastSyncError(result.errorMessage ?? null);
+        setLastSyncError(
+          result.errorMessage
+            ? formatUserErrorMessage(result.errorMessage, "Some sessions are waiting to retry.")
+            : null,
+        );
       }
     } catch (err) {
       setSyncStatus("failed");
-      setLastSyncError(err instanceof Error ? err.message : "Synchronization failed.");
+      setLastSyncError(formatUserErrorMessage(err, "Synchronization failed."));
     } finally {
       syncingRef.current = false;
     }
@@ -522,9 +596,11 @@ export function FocusProvider({ children }: { children: ReactNode }) {
   // Monitor real server connectivity & trigger automatic sync on reconnect
   useEffect(() => {
     if (!ready) return;
+    let active = true;
 
     const probeAndSync = async () => {
       const reachable = await checkServerConnectivity();
+      if (!active) return;
       setServerOnline(reachable);
       setNotificationPermission(getPermissionState());
       if (!reachable) {
@@ -532,8 +608,9 @@ export function FocusProvider({ children }: { children: ReactNode }) {
         wasOfflineOrPendingRef.current = true;
         return;
       }
-      const rec = await loadNotificationRecord();
-      if (rec.pendingSync) {
+      const rec = await loadNotificationRecord().catch(() => null);
+      if (!active) return;
+      if (rec?.pendingSync) {
         void syncNotificationPrefsNow();
       }
       const q = loadSyncQueue();
@@ -558,13 +635,36 @@ export function FocusProvider({ children }: { children: ReactNode }) {
     };
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
-        setNotificationPermission(getPermissionState());
+        setNow(Date.now());
+        if (isCapacitorNative()) {
+          void refreshPermissionState().then((perm) => {
+            if (active) setNotificationPermission(perm);
+          });
+        } else {
+          setNotificationPermission(getPermissionState());
+        }
       }
     };
 
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
     document.addEventListener("visibilitychange", onVisibility);
+
+    let removeNativeAppListener: (() => void) | undefined;
+    if (isCapacitorNative()) {
+      void registerNativeAppLifecycle({
+        onResume: () => {
+          setNow(Date.now());
+          void refreshPermissionState().then((perm) => {
+            if (active) setNotificationPermission(perm);
+          });
+          void probeAndSync();
+        },
+      }).then((unsub) => {
+        removeNativeAppListener = unsub;
+      });
+    }
+
     const intervalId = window.setInterval(() => {
       if (loadSyncQueue().length > 0 || !serverOnline) {
         void probeAndSync();
@@ -572,9 +672,11 @@ export function FocusProvider({ children }: { children: ReactNode }) {
     }, 15_000);
 
     return () => {
+      active = false;
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
       document.removeEventListener("visibilitychange", onVisibility);
+      removeNativeAppListener?.();
       window.clearInterval(intervalId);
     };
   }, [ready, triggerSync, serverOnline, syncNotificationPrefsNow]);
@@ -631,14 +733,26 @@ export function FocusProvider({ children }: { children: ReactNode }) {
     const st = settingsRef.current;
     const np = notificationPrefsRef.current;
     const perm = getPermissionState();
-    const shouldPlaySound = st.sound && (!np.enabled || np.sound);
-    if (shouldPlaySound) chime();
+    const shouldPlaySound = shouldPlayTimerChime({
+      settingsSound: st.sound,
+      companionEnabled: np.enabled,
+      companionSound: np.sound,
+    });
+    if (shouldPlaySound) {
+      playGentleChime(timer.kind === "break" ? "break-end" : "focus-end", {
+        tone: st.chimeTone,
+        volume: st.chimeVolume,
+      });
+    }
+    void triggerNativeHaptic("success");
 
     const activeSessionId = timer.sessionId || createSessionId(timer.endAt);
     void closeAppNotificationsByTag("focus-active-session");
 
     if (timer.kind === "break") {
-      setTimer(idle(timer.focusMinutes, timer.label, (timer.scheduleVersion ?? 0) + 1));
+      const nextIdle = idle(timer.focusMinutes, timer.label, (timer.scheduleVersion ?? 0) + 1);
+      timerRef.current = nextIdle;
+      setTimer(nextIdle);
       if ((np.enabled && np.breakReminders && perm === "granted") || st.notify) {
         void showAppNotification(
           buildBreakCompletePayload({
@@ -697,7 +811,9 @@ export function FocusProvider({ children }: { children: ReactNode }) {
     setSyncStatus(serverOnline ? "waiting" : "offline");
     if (!serverOnline) wasOfflineOrPendingRef.current = true;
 
-    setTimer((t) => ({ ...t, status: "completed", leftMs: 0 }));
+    const completedTimer: Timer = { ...timer, status: "completed", leftMs: 0 };
+    timerRef.current = completedTimer;
+    setTimer(completedTimer);
 
     if ((np.enabled && np.sessionCompletion && perm === "granted") || st.notify) {
       void showAppNotification(
@@ -721,10 +837,69 @@ export function FocusProvider({ children }: { children: ReactNode }) {
 
   const left = running ? remainingMs(timer.endAt, now) : timer.leftMs;
 
-  const setSettings = useCallback(
-    (p: Partial<Settings>) => setSettingsState((s) => ({ ...s, ...p })),
-    [],
-  );
+  const setSettings = useCallback((p: Partial<Settings>) => {
+    setSettingsState((s) => {
+      const next = { ...s, ...p };
+      if (p.customBackgroundDim !== undefined) {
+        next.customBackgroundDim = clampBackgroundDim(p.customBackgroundDim);
+      }
+      settingsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const clearCustomBackgroundError = useCallback(() => setCustomBackgroundError(null), []);
+
+  const uploadCustomBackground = useCallback(async (file: File) => {
+    setCustomBackgroundBusy(true);
+    setCustomBackgroundError(null);
+    try {
+      const processed = await processUploadedBackgroundFile(file);
+      const saved = await saveCustomBackground({
+        dataUrl: processed.dataUrl,
+        name: processed.name,
+        updatedAt: Date.now(),
+      });
+      setCustomBackgroundUrl(saved.dataUrl);
+      setSettingsState((s) => {
+        const next = {
+          ...s,
+          customBackgroundEnabled: true,
+          customBackgroundName: saved.name,
+        };
+        settingsRef.current = next;
+        return next;
+      });
+      return true;
+    } catch (err) {
+      setCustomBackgroundError(
+        err instanceof Error ? err.message : "Could not load selected image.",
+      );
+      return false;
+    } finally {
+      setCustomBackgroundBusy(false);
+    }
+  }, []);
+
+  const clearCustomBackground = useCallback(async () => {
+    setCustomBackgroundBusy(true);
+    setCustomBackgroundError(null);
+    try {
+      await deleteCustomBackground();
+      setCustomBackgroundUrl(null);
+      setSettingsState((s) => {
+        const next = {
+          ...s,
+          customBackgroundEnabled: false,
+          customBackgroundName: "",
+        };
+        settingsRef.current = next;
+        return next;
+      });
+    } finally {
+      setCustomBackgroundBusy(false);
+    }
+  }, []);
 
   const setNotificationPrefs = useCallback(
     (patch: Partial<NotificationPreferences>) => {
@@ -746,7 +921,7 @@ export function FocusProvider({ children }: { children: ReactNode }) {
             pendingSync: true,
           });
           setPushSyncPending(true);
-          if (typeof navigator === "undefined" || navigator.onLine) {
+          if (typeof navigator === "undefined" || navigator.onLine !== false) {
             void syncNotificationPrefsNow();
           }
         });
@@ -765,7 +940,7 @@ export function FocusProvider({ children }: { children: ReactNode }) {
         return {
           ok: false,
           permission: "unsupported" as NotificationPermissionState,
-          offline: typeof navigator !== "undefined" ? !navigator.onLine : false,
+          offline: typeof navigator !== "undefined" ? navigator.onLine === false : false,
           error: "Notifications are not supported in this browser.",
         };
       }
@@ -777,7 +952,7 @@ export function FocusProvider({ children }: { children: ReactNode }) {
         return {
           ok: false,
           permission: perm,
-          offline: typeof navigator !== "undefined" ? !navigator.onLine : false,
+          offline: typeof navigator !== "undefined" ? navigator.onLine === false : false,
           error:
             perm === "denied"
               ? "Notifications are blocked in your browser settings."
@@ -851,13 +1026,61 @@ export function FocusProvider({ children }: { children: ReactNode }) {
     setNotificationSyncError(res.error ?? null);
   }, []);
 
+  const previewChime = useCallback(
+    (event: ChimeEvent = "focus-end", tone?: ChimeTone, volume?: number) => {
+      const st = settingsRef.current;
+      warmUpChimeAudio();
+      playGentleChime(event, {
+        tone: tone ?? st.chimeTone,
+        volume: volume ?? st.chimeVolume,
+      });
+    },
+    [],
+  );
+
   const sendTestCompanionNotification = useCallback(async () => {
     let idToken: string | null = null;
     if (userRef.current) {
       idToken = await userRef.current.getIdToken().catch(() => null);
     }
+    const st = settingsRef.current;
+    const np = notificationPrefsRef.current;
+    if (
+      shouldPlayTimerChime({
+        settingsSound: st.sound,
+        companionEnabled: np.enabled,
+        companionSound: np.sound,
+      })
+    ) {
+      warmUpChimeAudio();
+      playGentleChime("focus-end", {
+        tone: st.chimeTone,
+        volume: st.chimeVolume,
+      });
+    }
     return sendServerOrLocalTestNotification(idToken);
   }, []);
+
+  const updateTimerSync = useCallback((updater: (prev: Timer) => Timer) => {
+    const next = updater(timerRef.current);
+    timerRef.current = next;
+    setTimer(next);
+    return next;
+  }, []);
+
+  const selectMinutes = useCallback(
+    (m: number) => {
+      updateTimerSync((t) => idle(m, t.label, t.scheduleVersion ?? 0));
+    },
+    [updateTimerSync],
+  );
+
+  const setLabel = useCallback(
+    (label: string) => {
+      updateTimerSync((t) => ({ ...t, label }));
+    },
+    [updateTimerSync],
+  );
 
   const start = useCallback(() => {
     const n = Date.now();
@@ -865,21 +1088,26 @@ export function FocusProvider({ children }: { children: ReactNode }) {
     const cur = timerRef.current;
     if (cur.status === "running") return; // Guard against duplicate session starts
 
+    if (settingsRef.current.sound) {
+      warmUpChimeAudio();
+    }
+    void triggerNativeHaptic("light");
+
     const sessionId = createSessionId(n);
     const scheduleVersion = (cur.scheduleVersion ?? 0) + 1;
     const endAt = n + cur.focusMinutes * 60000;
 
-    setTimer({
+    updateTimerSync(() => ({
       ...idle(cur.focusMinutes, cur.label, scheduleVersion),
       status: "running",
       startedAt: n,
       endAt,
       sessionId,
       scheduleVersion,
-    });
+    }));
 
     const np = notificationPrefsRef.current;
-    if (np.enabled && getPermissionState() === "granted") {
+    if (np.enabled && (getPermissionState() === "granted" || isCapacitorNative())) {
       if (np.sessionOngoing) {
         void showAppNotification(
           buildFocusStartPayload({
@@ -904,7 +1132,7 @@ export function FocusProvider({ children }: { children: ReactNode }) {
         });
       }
     }
-  }, []);
+  }, [updateTimerSync]);
 
   const startBreak = useCallback(() => {
     const n = Date.now();
@@ -912,13 +1140,32 @@ export function FocusProvider({ children }: { children: ReactNode }) {
     const cur = timerRef.current;
     if (cur.status === "running" && cur.kind === "break") return;
 
-    const b = settingsRef.current.breakMinutes;
+    const st = settingsRef.current;
+    const np = notificationPrefsRef.current;
+    if (st.sound) {
+      warmUpChimeAudio();
+    }
+    void triggerNativeHaptic("light");
+    if (
+      shouldPlayTimerChime({
+        settingsSound: st.sound,
+        companionEnabled: np.enabled,
+        companionSound: np.sound,
+      })
+    ) {
+      playGentleChime("break-start", {
+        tone: st.chimeTone,
+        volume: st.chimeVolume,
+      });
+    }
+
+    const b = st.breakMinutes;
     const sessionId = createSessionId(n);
     const scheduleVersion = (cur.scheduleVersion ?? 0) + 1;
     const endAt = n + b * 60000;
 
-    setTimer({
-      ...cur,
+    updateTimerSync((prev) => ({
+      ...prev,
       kind: "break",
       minutes: b,
       status: "running",
@@ -927,10 +1174,9 @@ export function FocusProvider({ children }: { children: ReactNode }) {
       leftMs: b * 60000,
       sessionId,
       scheduleVersion,
-    });
+    }));
 
-    const np = notificationPrefsRef.current;
-    if (np.enabled && np.breakReminders && getPermissionState() === "granted") {
+    if (np.enabled && np.breakReminders && (getPermissionState() === "granted" || isCapacitorNative())) {
       void showAppNotification(
         buildBreakStartPayload({
           sessionId,
@@ -949,22 +1195,23 @@ export function FocusProvider({ children }: { children: ReactNode }) {
         label: "Break",
       });
     }
-  }, []);
+  }, [updateTimerSync]);
 
   const pause = useCallback(() => {
     const cur = timerRef.current;
     if (cur.status !== "running") return;
+    void triggerNativeHaptic("light");
     const leftMsNow = remainingMs(cur.endAt, Date.now());
     const scheduleVersion = (cur.scheduleVersion ?? 0) + 1;
     const sessionId = cur.sessionId || createSessionId(Date.now());
 
-    setTimer({
-      ...cur,
+    updateTimerSync((prev) => ({
+      ...prev,
       status: "paused",
       leftMs: leftMsNow,
       sessionId,
       scheduleVersion,
-    });
+    }));
 
     const np = notificationPrefsRef.current;
     if (np.enabled && np.sessionOngoing && getPermissionState() === "granted") {
@@ -982,27 +1229,31 @@ export function FocusProvider({ children }: { children: ReactNode }) {
       scheduleVersion,
       nextStatus: "paused",
     });
-  }, []);
+  }, [updateTimerSync]);
 
   const resume = useCallback(() => {
     const cur = timerRef.current;
     if (cur.status !== "paused") return;
+    if (settingsRef.current.sound) {
+      warmUpChimeAudio();
+    }
+    void triggerNativeHaptic("light");
     const n = Date.now();
     setNow(n);
     const endAt = n + cur.leftMs;
     const scheduleVersion = (cur.scheduleVersion ?? 0) + 1;
     const sessionId = cur.sessionId || createSessionId(n);
 
-    setTimer({
-      ...cur,
+    updateTimerSync((prev) => ({
+      ...prev,
       status: "running",
       endAt,
       sessionId,
       scheduleVersion,
-    });
+    }));
 
     const np = notificationPrefsRef.current;
-    if (np.enabled && getPermissionState() === "granted") {
+    if (np.enabled && (getPermissionState() === "granted" || isCapacitorNative())) {
       const remMins = Math.max(1, Math.ceil(cur.leftMs / 60000));
       if (cur.kind === "focus" && np.sessionOngoing) {
         void showAppNotification(
@@ -1041,36 +1292,38 @@ export function FocusProvider({ children }: { children: ReactNode }) {
         });
       }
     }
-  }, []);
+  }, [updateTimerSync]);
 
   const reset = useCallback(() => {
     const cur = timerRef.current;
     const scheduleVersion = (cur.scheduleVersion ?? 0) + 1;
+    void triggerNativeHaptic("warning");
     void closeAppNotificationsByTag("focus-active-session");
     void cancelSessionScheduleOnServer({
       ...(cur.sessionId ? { sessionId: cur.sessionId } : {}),
       scheduleVersion,
       nextStatus: "idle",
     });
-    setTimer((t) => idle(t.focusMinutes, t.label, scheduleVersion));
-  }, []);
+    updateTimerSync((t) => idle(t.focusMinutes, t.label, scheduleVersion));
+  }, [updateTimerSync]);
 
   const end = useCallback(() => {
     const cur = timerRef.current;
     const scheduleVersion = (cur.scheduleVersion ?? 0) + 1;
+    void triggerNativeHaptic("warning");
     void closeAppNotificationsByTag("focus-active-session");
     void cancelSessionScheduleOnServer({
       ...(cur.sessionId ? { sessionId: cur.sessionId } : {}),
       scheduleVersion,
       nextStatus: "idle",
     });
-    setTimer((t) => idle(t.focusMinutes, t.label, scheduleVersion));
-  }, []);
+    updateTimerSync((t) => idle(t.focusMinutes, t.label, scheduleVersion));
+  }, [updateTimerSync]);
 
   const dismiss = useCallback(() => {
     const cur = timerRef.current;
-    setTimer((t) => idle(t.focusMinutes, t.label, (cur.scheduleVersion ?? 0) + 1));
-  }, []);
+    updateTimerSync((t) => idle(t.focusMinutes, t.label, (cur.scheduleVersion ?? 0) + 1));
+  }, [updateTimerSync]);
 
   // Handle notificationclick actions via SW messages and launch URL params
   useEffect(() => {
@@ -1108,11 +1361,25 @@ export function FocusProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.addEventListener("message", onSwMessage);
-      return () => navigator.serviceWorker.removeEventListener("message", onSwMessage);
+    let removeNativeNotifListener: (() => void) | undefined;
+    if (isCapacitorNative()) {
+      void registerNativeNotificationActionListener((action) => {
+        handleAction(action);
+      }).then((unsub) => {
+        removeNativeNotifListener = unsub;
+      });
     }
-    return undefined;
+
+    if ("serviceWorker" in navigator && !isCapacitorNative()) {
+      navigator.serviceWorker.addEventListener("message", onSwMessage);
+      return () => {
+        navigator.serviceWorker.removeEventListener("message", onSwMessage);
+        removeNativeNotifListener?.();
+      };
+    }
+    return () => {
+      removeNativeNotifListener?.();
+    };
   }, [ready, start, startBreak, syncNotificationPrefsNow]);
 
   const signingInRef = useRef(false);
@@ -1137,8 +1404,12 @@ export function FocusProvider({ children }: { children: ReactNode }) {
 
   const signOutAccount = useCallback(async () => {
     setAuthError(null);
-    await signOut(auth);
-    setProfile(null);
+    try {
+      await signOut(auth);
+      setProfile(null);
+    } catch (err) {
+      setAuthError(formatUserErrorMessage(err, "Could not sign out cleanly."));
+    }
   }, []);
 
   const saveProfileChanges = useCallback(
@@ -1189,8 +1460,8 @@ export function FocusProvider({ children }: { children: ReactNode }) {
       sessions,
       immersiveManual,
       setImmersiveManual,
-      selectMinutes: (m) => setTimer((t) => idle(m, t.label, t.scheduleVersion ?? 0)),
-      setLabel: (label) => setTimer((t) => ({ ...t, label })),
+      selectMinutes,
+      setLabel,
       start,
       startBreak,
       pause,
@@ -1238,6 +1509,13 @@ export function FocusProvider({ children }: { children: ReactNode }) {
       disableCompanionNotifications,
       syncNotificationPrefsNow,
       sendTestCompanionNotification,
+      previewChime,
+      customBackgroundUrl,
+      customBackgroundBusy,
+      customBackgroundError,
+      uploadCustomBackground,
+      clearCustomBackground,
+      clearCustomBackgroundError,
     }),
     [
       ready,
@@ -1247,6 +1525,8 @@ export function FocusProvider({ children }: { children: ReactNode }) {
       left,
       sessions,
       immersiveManual,
+      selectMinutes,
+      setLabel,
       start,
       startBreak,
       pause,
@@ -1286,6 +1566,13 @@ export function FocusProvider({ children }: { children: ReactNode }) {
       disableCompanionNotifications,
       syncNotificationPrefsNow,
       sendTestCompanionNotification,
+      previewChime,
+      customBackgroundUrl,
+      customBackgroundBusy,
+      customBackgroundError,
+      uploadCustomBackground,
+      clearCustomBackground,
+      clearCustomBackgroundError,
     ],
   );
 

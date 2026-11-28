@@ -1,14 +1,27 @@
 import {
+  cancelNativeSessionCompletion,
+  closeNativeNotificationsByTag,
+  getCachedNativePermissionState,
+  isCapacitorNative,
+  refreshNativeNotificationPermission,
+  requestNativeNotificationPermission,
+  scheduleNativeDailyMotivationReminders,
+  scheduleNativeSessionCompletion,
+  showNativeLocalNotification,
+} from "./capacitor-native";
+import {
   hasDeliveredNotification,
   loadNotificationRecord,
   markNotificationDelivered,
   saveNotificationRecord,
   type StoredNotificationRecord,
 } from "./notification-db";
-import type {
-  CompanionNotificationPayload,
-  NotificationPermissionState,
-  NotificationPreferences,
+import {
+  buildBreakCompletePayload,
+  buildSessionCompletePayload,
+  type CompanionNotificationPayload,
+  type NotificationPermissionState,
+  type NotificationPreferences,
 } from "./notifications-core";
 
 export interface NotificationSupportInfo {
@@ -19,6 +32,7 @@ export interface NotificationSupportInfo {
   isIOS: boolean;
   isStandalone: boolean;
   iosNeedsHomeScreen: boolean;
+  isNativeApp?: boolean;
 }
 
 export function getNotificationSupport(): NotificationSupportInfo {
@@ -31,6 +45,20 @@ export function getNotificationSupport(): NotificationSupportInfo {
       isIOS: false,
       isStandalone: false,
       iosNeedsHomeScreen: false,
+      isNativeApp: false,
+    };
+  }
+
+  if (isCapacitorNative()) {
+    return {
+      notificationApi: true,
+      serviceWorker: false,
+      pushManager: false,
+      actionsSupported: true,
+      isIOS: false,
+      isStandalone: true,
+      iosNeedsHomeScreen: false,
+      isNativeApp: true,
     };
   }
 
@@ -38,7 +66,10 @@ export function getNotificationSupport(): NotificationSupportInfo {
   const serviceWorker = "serviceWorker" in navigator;
   const pushManager = "PushManager" in window;
   const actionsSupported =
-    notificationApi && typeof Notification !== "undefined" && "actions" in Notification.prototype;
+    notificationApi &&
+    typeof Notification !== "undefined" &&
+    Boolean(Notification.prototype) &&
+    "actions" in Notification.prototype;
 
   const ua = window.navigator.userAgent.toLowerCase();
   const isIOS =
@@ -55,10 +86,14 @@ export function getNotificationSupport(): NotificationSupportInfo {
     isIOS,
     isStandalone,
     iosNeedsHomeScreen: isIOS && !isStandalone,
+    isNativeApp: false,
   };
 }
 
 export function getPermissionState(): NotificationPermissionState {
+  if (isCapacitorNative()) {
+    return getCachedNativePermissionState();
+  }
   if (typeof window === "undefined" || !("Notification" in window)) {
     return "unsupported";
   }
@@ -67,17 +102,51 @@ export function getPermissionState(): NotificationPermissionState {
   return "unsupported";
 }
 
+export async function refreshPermissionState(): Promise<NotificationPermissionState> {
+  if (isCapacitorNative()) {
+    return refreshNativeNotificationPermission();
+  }
+  return getPermissionState();
+}
+
 export async function requestNotificationPermissionExplicit(): Promise<NotificationPermissionState> {
+  if (isCapacitorNative()) {
+    return requestNativeNotificationPermission();
+  }
   if (typeof window === "undefined" || !("Notification" in window)) {
     return "unsupported";
   }
   if (Notification.permission === "granted") return "granted";
   if (Notification.permission === "denied") return "denied";
   try {
-    const result = await Notification.requestPermission();
+    const result = await new Promise<NotificationPermission>((resolve, reject) => {
+      const maybePromise = Notification.requestPermission((legacyPerm) => {
+        resolve(legacyPerm);
+      });
+      if (maybePromise && typeof maybePromise.then === "function") {
+        maybePromise.then(resolve, reject);
+      }
+    });
     return result === "granted" || result === "denied" ? result : "default";
   } catch {
     return getPermissionState();
+  }
+}
+
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  timeoutMs = 8000,
+): Promise<Response> {
+  if (typeof AbortController === "undefined") {
+    return fetch(input, init);
+  }
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(id);
   }
 }
 
@@ -94,6 +163,7 @@ export function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuf
 }
 
 async function getReadyServiceWorkerRegistration(): Promise<ServiceWorkerRegistration | null> {
+  if (isCapacitorNative()) return null;
   if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return null;
   try {
     const existing = await navigator.serviceWorker.getRegistration();
@@ -108,6 +178,17 @@ async function getReadyServiceWorkerRegistration(): Promise<ServiceWorkerRegistr
 }
 
 export async function showAppNotification(payload: CompanionNotificationPayload): Promise<boolean> {
+  if (isCapacitorNative()) {
+    const perm = await refreshNativeNotificationPermission();
+    if (perm !== "granted") return false;
+    if (payload.dedupeKey) {
+      const already = await hasDeliveredNotification(payload.dedupeKey);
+      if (already) return false;
+      await markNotificationDelivered(payload.dedupeKey, payload.category);
+    }
+    return showNativeLocalNotification(payload);
+  }
+
   if (getPermissionState() !== "granted") return false;
 
   if (payload.dedupeKey) {
@@ -169,6 +250,10 @@ export async function showAppNotification(payload: CompanionNotificationPayload)
 }
 
 export async function closeAppNotificationsByTag(tag: string): Promise<void> {
+  if (isCapacitorNative()) {
+    await closeNativeNotificationsByTag(tag);
+    return;
+  }
   const reg = await getReadyServiceWorkerRegistration();
   if (!reg || typeof reg.getNotifications !== "function") return;
   try {
@@ -209,7 +294,21 @@ export async function syncPushSubscriptionAndPrefs(params: {
   };
   await saveNotificationRecord(nextRecord);
 
-  if (typeof navigator !== "undefined" && !navigator.onLine) {
+  if (isCapacitorNative()) {
+    const perm = await refreshNativeNotificationPermission();
+    await scheduleNativeDailyMotivationReminders(
+      perm === "granted" ? params.preferences : { ...params.preferences, enabled: false },
+    );
+    await saveNotificationRecord({
+      ...nextRecord,
+      pushEndpoint: null,
+      pendingSync: false,
+      lastSyncedAt: Date.now(),
+    });
+    return { subscribed: perm === "granted" && params.preferences.enabled, offline: false };
+  }
+
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
     return { subscribed: Boolean(record.pushEndpoint), offline: true };
   }
 
@@ -225,7 +324,7 @@ export async function syncPushSubscriptionAndPrefs(params: {
         if (existingSub) {
           await existingSub.unsubscribe().catch(() => {});
         }
-        await fetch("/api/push/unsubscribe", {
+        await fetchWithTimeout("/api/push/unsubscribe", {
           method: "POST",
           headers: authHeaders(nextRecord, params.idToken),
           body: JSON.stringify({ installationId: nextRecord.installationId }),
@@ -250,7 +349,7 @@ export async function syncPushSubscriptionAndPrefs(params: {
       return { subscribed: false, offline: false };
     }
 
-    const vapidRes = await fetch("/api/push/vapid-public-key", { cache: "no-store" });
+    const vapidRes = await fetchWithTimeout("/api/push/vapid-public-key", { cache: "no-store" });
     if (!vapidRes.ok) {
       return {
         subscribed: Boolean(record.pushEndpoint),
@@ -282,7 +381,7 @@ export async function syncPushSubscriptionAndPrefs(params: {
       return { subscribed: false, offline: false };
     }
 
-    const subRes = await fetch("/api/push/subscribe", {
+    const subRes = await fetchWithTimeout("/api/push/subscribe", {
       method: "POST",
       headers: authHeaders(nextRecord, params.idToken),
       body: JSON.stringify({
@@ -313,7 +412,7 @@ export async function syncPushSubscriptionAndPrefs(params: {
   } catch (err) {
     return {
       subscribed: Boolean(record.pushEndpoint),
-      offline: typeof navigator !== "undefined" ? !navigator.onLine : false,
+      offline: typeof navigator !== "undefined" ? navigator.onLine === false : false,
       error: err instanceof Error ? err.message : "Failed to sync notification settings.",
     };
   }
@@ -328,7 +427,32 @@ export async function syncSessionScheduleToServer(params: {
   label?: string;
   idToken?: string | null;
 }): Promise<{ scheduled: boolean; offline: boolean }> {
-  if (typeof navigator !== "undefined" && !navigator.onLine) {
+  if (isCapacitorNative()) {
+    const record = await loadNotificationRecord();
+    if (!record.preferences.enabled) {
+      return { scheduled: false, offline: false };
+    }
+    const payload =
+      params.kind === "break"
+        ? buildBreakCompletePayload({
+            sessionId: params.sessionId,
+            minutes: params.minutes,
+            sound: record.preferences.sound,
+          })
+        : buildSessionCompletePayload({
+            sessionId: params.sessionId,
+            minutes: params.minutes,
+            ...(params.label ? { label: params.label } : {}),
+            sound: record.preferences.sound,
+          });
+    const scheduled = await scheduleNativeSessionCompletion({
+      expectedEndAt: params.expectedEndAt,
+      payload,
+    });
+    return { scheduled, offline: false };
+  }
+
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
     return { scheduled: false, offline: true };
   }
   const record = await loadNotificationRecord();
@@ -336,7 +460,7 @@ export async function syncSessionScheduleToServer(params: {
     return { scheduled: false, offline: false };
   }
   try {
-    const res = await fetch("/api/push/schedule-session", {
+    const res = await fetchWithTimeout("/api/push/schedule-session", {
       method: "POST",
       headers: authHeaders(record, params.idToken),
       body: JSON.stringify({
@@ -361,11 +485,15 @@ export async function cancelSessionScheduleOnServer(params: {
   nextStatus?: "idle" | "paused";
   idToken?: string | null;
 }): Promise<void> {
-  if (typeof navigator !== "undefined" && !navigator.onLine) return;
+  if (isCapacitorNative()) {
+    await cancelNativeSessionCompletion();
+    return;
+  }
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return;
   const record = await loadNotificationRecord();
   if (!record.pushEndpoint) return;
   try {
-    await fetch("/api/push/cancel-session", {
+    await fetchWithTimeout("/api/push/cancel-session", {
       method: "POST",
       headers: authHeaders(record, params.idToken),
       body: JSON.stringify({
@@ -383,7 +511,10 @@ export async function cancelSessionScheduleOnServer(params: {
 export async function sendServerOrLocalTestNotification(
   idToken?: string | null,
 ): Promise<{ ok: boolean; via: "push" | "local" | "none"; message: string }> {
-  if (getPermissionState() !== "granted") {
+  const perm = isCapacitorNative()
+    ? await refreshNativeNotificationPermission()
+    : getPermissionState();
+  if (perm !== "granted") {
     return {
       ok: false,
       via: "none",
@@ -392,9 +523,14 @@ export async function sendServerOrLocalTestNotification(
   }
 
   const record = await loadNotificationRecord();
-  if (typeof navigator !== "undefined" && navigator.onLine && record.pushEndpoint) {
+  if (
+    !isCapacitorNative() &&
+    typeof navigator !== "undefined" &&
+    navigator.onLine !== false &&
+    record.pushEndpoint
+  ) {
     try {
-      const res = await fetch("/api/push/test", {
+      const res = await fetchWithTimeout("/api/push/test", {
         method: "POST",
         headers: authHeaders(record, idToken),
         body: JSON.stringify({ installationId: record.installationId }),
